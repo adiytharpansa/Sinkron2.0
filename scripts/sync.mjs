@@ -1,67 +1,93 @@
 #!/usr/bin/env node
 /**
  * Sinkron2.0 — sinkron otomatis my-anime, dijalankan dari
- * GitHub Actions (bukan lagi dari VM / Cloudflare Worker).
+ * GitHub Actions (bukan dari VM / Cloudflare Worker). Versi 2:
+ * ter-shard + paralel + dua mode (fast/full).
  *
- * Tugasnya sama persis dengan auto_sync.py lama:
+ * Sumber (satu-satunya yang terverifikasi hidup):
  *   - hianimes.se    : sitemap /watch/ -> MAL id -> embed Zoko
  *                      (konfigurasi __P didekode) -> m3u8 asli
  *   - gogoanime.or.at: sitemap WordPress -> halaman episode ->
  *                      MegaPlay (AES-256-CBC) -> m3u8 asli
  *   - 9anime.or.at   : sitemap WordPress -> AJAX server ->
  *                      embed Plyr -> redirect -> MP4 langsung
- * lalu episode baru dikirim ke API aplikasi
+ * Episode baru dikirim ke API aplikasi
  * (POST https://my-anime-app.adiyth-arpansa.workers.dev/api/anime)
- * yang menyimpannya per judul ke katalog live.
+ * yang menyimpannya per judul ke katalog live (D1/KV aplikasi).
+ * Supabase HANYA untuk sync_logs + sync_hashes (service role
+ * key dibaca dari environment / GitHub Secrets saja) — katalog
+ * tidak punya tabel di Supabase, situs membacanya dari store
+ * aplikasi lewat /api/anime.
  *
- * Kenapa bukan upsert langsung ke Supabase untuk katalog?
- * Situs my-anime membaca katalognya dari store aplikasi
- * (D1/KV lewat /api/anime) — tidak ada tabel anime/episodes
- * di Supabase. Menulis katalog ke Supabase saja tidak akan
- * pernah tampil di web. Supabase dipakai di sini sesuai
- * perannya: tabel sync_logs (+ sync_hashes) untuk log &
- * keadaan sinkron, ditulis dengan service role key yang
- * HANYA dibaca dari environment / GitHub Secrets.
+ * Arsitektur shard (workflow matrix):
+ *   - Daftar kandidat judul dibangun deterministik (union
+ *     katalog + peta situs ketiga sumber, diurutkan per kunci)
+ *     lalu tiap shard hanya memproses kandidat dengan
+ *     index % SHARD_TOTAL === SHARD_INDEX. Semua shard
+ *     menghitung daftar yang sama dari masukan yang sama,
+ *     jadi partisi selalu saling lepas & lengkap.
+ *   - Di dalam shard, judul diproses paralel dengan p-limit;
+ *     konkurensi dari env CONCURRENCY (bawaan 8; tahap awal
+ *     penyebaran memakai 5 — lihat README, bagian ramp-up).
+ *   - Mode fast (SYNC_MODE=fast): hanya judul RELEASING
+ *     (+ judul baru yang belum ada di katalog). Mode full:
+ *     semua judul.
  *
- * Hemat kuota (inkremental berbasis hash):
- *   - Keadaan katalog dibaca dari SATU GET /api/anime
- *     (ter-cache tepi 120 dtk) — ringkasannya sudah memuat
- *     episodeNumbers/status/totalEpisodes per judul, jadi
- *     TIDAK ada lagi ratusan GET detail per run (itulah yang
- *     dulu membakar kuota baca D1).
- *   - Hash sha256 per judul (id + episode + updatedAt +
- *     daftar episode di situs) disimpan di .sync-cache.json
- *     (di Actions dipertahankan antar-run via actions/cache)
- *     dan dicerminkan ke Supabase sync_hashes bila tersedia.
- *     Judul yang hash-nya sama persis dilewati tanpa satu pun
- *     pengambilan halaman.
- *   - Judul FINISHED yang episodenya sudah lengkap dilewati.
- *   - Metadata AniList di-cache dengan TTL 7 hari.
- *   - GET detail judul hanya diambil saat judul itu BENAR-
- *     BENAR akan ditambah episodenya (untuk rawTitle asli).
+ * Hemat kerja:
+ *   - Hash sha256 per judul (fingerprint katalog+situs) di
+ *     .sync-cache.json (dipertahankan antar-run via
+ *     actions/cache) + cermin Supabase sync_hashes: judul tak
+ *     berubah dilewati tanpa mengambil satu halaman pun.
+ *   - Hash per EPISODE (streamUnduh+subtitle): episode yang
+ *     payload-nya identik dengan yang pernah terkirim tidak
+ *     dikirim ulang walau fingerprint judul berubah.
+ *   - Judul FINISHED yang episodenya lengkap dilewati.
+ *   - Metadata AniList di-cache TTL 7 hari (cache yang sama).
+ *   - Keadaan katalog dari SATU GET /api/anime per shard.
+ *
+ * Ketahanan request: timeout per request, retry dengan
+ * backoff eksponensial + jitter, HTTP 429 dihormati lewat
+ * header Retry-After, dan pelacak kesehatan per host: bila
+ * satu host membalas 403/429 beruntun, jeda antar-request ke
+ * host itu dinaikkan otomatis dan peringatan dicetak (sinyal
+ * untuk menurunkan CONCURRENCY/SHARD_TOTAL di workflow).
+ *
+ * Revalidate: bila ada episode baru dan REVALIDATE_SECRET
+ * terisi, di akhir run shard memanggil
+ * POST {origin API}/api/revalidate {slugs:[...]} agar memo
+ * katalog Worker dibersihkan dan halaman terkait langsung
+ * segar (tanpa menunggu TTL 120 detik).
  *
  * Lingkungan:
  *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY  (opsional —
- *     hanya untuk sync_logs/sync_hashes; sinkron katalog
- *     tetap jalan tanpa keduanya, log cukup ke konsol)
- *   ANIME_API_URL   bawaan API live di atas
- *   SYNC_MAX        batas episode per run (bawaan 20, agar
- *                   muat di timeout workflow 10 menit)
- *   SYNC_GAP_MS     jeda sopan antar request (bawaan 1500)
+ *     hanya sync_logs/sync_hashes; tanpa keduanya sinkron
+ *     katalog tetap jalan, log cukup ke konsol)
+ *   ANIME_API_URL    bawaan API live di atas
+ *   SYNC_MODE        fast | full (bawaan full)
+ *   SHARD_INDEX      0..SHARD_TOTAL-1 (bawaan 0)
+ *   SHARD_TOTAL      jumlah shard (bawaan 1)
+ *   CONCURRENCY      paralel per shard (bawaan 8)
+ *   SYNC_MAX         batas episode per shard per run
+ *   SYNC_GAP_MS      jeda sopan dasar antar request sumber
+ *   REVALIDATE_SECRET  token bersama endpoint revalidate
  *
- * Bendera: --max N --dry-run --source hianime|gogoanime|9anime
- *          --limit-series N (uji) --help
- * Keluar non-nol bila run gagal fatal (katalog tak terbaca
- * atau semua sumber gagal) agar GitHub mengirim notifikasi.
+ * Bendera: --mode fast|full --shard I --shards N
+ *          --concurrency N --max N --dry-run
+ *          --source hianime|gogoanime|9anime
+ *          --limit-series N (uji) --self-test-shard --help
+ * Keluar non-nol bila run gagal fatal agar GitHub memberi
+ * notifikasi kegagalan.
  */
 import { createHash, createDecipheriv } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
+import pLimit from 'p-limit';
 
 const API = (process.env.ANIME_API_URL || 'https://my-anime-app.adiyth-arpansa.workers.dev/api/anime').replace(/\/$/, '');
+const SITE_ORIGIN = new URL(API).origin;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
-const GAP_MS = Number(process.env.SYNC_GAP_MS || 1500);
+const GAP_MS = Number(process.env.SYNC_GAP_MS || 400);
 const CACHE_PATH = path.resolve(process.env.SYNC_CACHE_PATH || '.sync-cache.json');
 const ANILIST_META_TTL_MS = 7 * 24 * 3600 * 1000;
 const DETAIL_TTL_MS = 6 * 3600 * 1000;
@@ -71,12 +97,34 @@ function argValue(name, fallback) {
   const i = args.indexOf(name);
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 }
+const MODE = String(argValue('--mode', process.env.SYNC_MODE || 'full')).toLowerCase() === 'fast' ? 'fast' : 'full';
+const SHARD_TOTAL = Math.max(1, Number(argValue('--shards', process.env.SHARD_TOTAL || 1)) || 1);
+const SHARD_INDEX = Math.min(SHARD_TOTAL - 1, Math.max(0, Number(argValue('--shard', process.env.SHARD_INDEX || 0)) || 0));
+const CONCURRENCY = Math.max(1, Number(argValue('--concurrency', process.env.CONCURRENCY || 8)) || 8);
 const MAX_EPISODES = Number(argValue('--max', process.env.SYNC_MAX || 20));
 const DRY_RUN = args.includes('--dry-run');
 const ONLY_SOURCE = argValue('--source', '');
 const LIMIT_SERIES = Number(argValue('--limit-series', 0));
 if (args.includes('--help')) {
-  console.log('Pemakaian: node scripts/sync.mjs [--max N] [--dry-run] [--source hianime|gogoanime|9anime] [--limit-series N]');
+  console.log('Pemakaian: node scripts/sync.mjs [--mode fast|full] [--shard I --shards N] [--concurrency N] [--max N] [--dry-run] [--source hianime|gogoanime|9anime] [--limit-series N] [--self-test-shard]');
+  process.exit(0);
+}
+
+/** Partisi shard murni: kandidat terurut -> milik shard ini. */
+export function shardSlice(sortedKeys, shardIndex, shardTotal) {
+  return sortedKeys.filter((_, i) => i % shardTotal === shardIndex);
+}
+if (args.includes('--self-test-shard')) {
+  const keys = Array.from({ length: 101 }, (_, i) => `judul-${String(i).padStart(3, '0')}`);
+  const seen = new Set();
+  for (let s = 0; s < 4; s++) {
+    for (const k of shardSlice(keys, s, 4)) {
+      if (seen.has(k)) { console.error(`GAGAL: ${k} muncul di dua shard`); process.exit(1); }
+      seen.add(k);
+    }
+  }
+  if (seen.size !== keys.length) { console.error('GAGAL: partisi tidak lengkap'); process.exit(1); }
+  console.log('self-test shard LOLOS: 4 shard saling lepas & lengkap atas 101 kunci');
   process.exit(0);
 }
 
@@ -85,10 +133,31 @@ const sha256 = (text) => createHash('sha256').update(String(text)).digest('hex')
 const slugify = (text) => String(text || 'anime').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'anime';
 const normTitle = (text) => String(text || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
 
-/** fetch dengan timeout + retry backoff eksponensial + jitter. */
+/* ------- kesehatan host: rem otomatis saat 403/429 ------- */
+const hostHealth = new Map(); // host -> { strikes, penaltyUntil }
+function hostStrike(host, status) {
+  if (status !== 403 && status !== 429) return;
+  const h = hostHealth.get(host) || { strikes: 0, penaltyUntil: 0 };
+  h.strikes += 1;
+  h.penaltyUntil = Date.now() + Math.min(120000, 5000 * h.strikes);
+  hostHealth.set(host, h);
+  if (h.strikes >= 3) {
+    console.warn(`[!] Host ${host} membalas ${status} beruntun (${h.strikes}x) — jeda otomatis dinaikkan. Bila berlanjut, turunkan CONCURRENCY / SHARD_TOTAL (lihat README ramp-down).`);
+  }
+}
+async function hostGate(host) {
+  const h = hostHealth.get(host);
+  if (h && h.penaltyUntil > Date.now()) await sleep(Math.min(30000, h.penaltyUntil - Date.now()));
+}
+
+/** fetch dengan timeout + retry backoff eksponensial + jitter;
+ *  HTTP 429 dihormati lewat Retry-After. */
 async function fetchText(url, { timeoutMs = 30000, retries = 3, headers = {}, redirect = 'follow' } = {}) {
+  let host = '';
+  try { host = new URL(url).host; } catch { /* abaikan */ }
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
+    if (host) await hostGate(host);
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
@@ -98,13 +167,22 @@ async function fetchText(url, { timeoutMs = 30000, retries = 3, headers = {}, re
         headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9', ...headers },
       });
       clearTimeout(timer);
-      if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (res.status === 429 || res.status >= 500 || res.status === 403) {
+        if (host) hostStrike(host, res.status);
+        const ra = Number(res.headers.get('retry-after'));
+        const wait = res.status === 429 && Number.isFinite(ra) && ra > 0
+          ? Math.min(60000, ra * 1000)
+          : Math.min(30000, 1000 * 2 ** attempt) + Math.random() * 500;
+        throw Object.assign(new Error(`HTTP ${res.status}`), { retryWaitMs: wait, retryable: res.status !== 403 || attempt < 1 });
+      }
+      if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { retryable: false });
+      if (host) { const h = hostHealth.get(host); if (h && h.strikes > 0) { h.strikes = 0; hostHealth.set(host, h); } }
       return { text: await res.text(), url: res.url, status: res.status };
     } catch (err) {
       clearTimeout(timer);
       lastErr = err;
-      if (attempt < retries) await sleep(Math.min(15000, 800 * 2 ** attempt) + Math.random() * 400);
+      if (err.retryable === false) break;
+      if (attempt < retries) await sleep(err.retryWaitMs || (Math.min(15000, 800 * 2 ** attempt) + Math.random() * 400));
     }
   }
   throw lastErr;
@@ -115,11 +193,14 @@ async function fetchJson(url, opts) {
 }
 
 /* ---------------- cache lokal (dipertahankan Actions/cache) ---------------- */
-let cache = { hashes: {}, anilist: {}, details: {}, malByAnimeId: {} };
+let cache = { hashes: {}, epHashes: {}, anilist: {}, details: {}, malByAnimeId: {} };
 try {
   cache = { ...cache, ...JSON.parse(await readFile(CACHE_PATH, 'utf8')) };
 } catch { /* run pertama: cache kosong itu wajar */ }
+cache.epHashes = cache.epHashes || {};
+let cacheDirty = false;
 async function saveCache() {
+  if (!cacheDirty && !DRY_RUN) { /* tetap tulis: murah & aman */ }
   try { await writeFile(CACHE_PATH, JSON.stringify(cache)); } catch { /* best-effort */ }
 }
 
@@ -141,7 +222,8 @@ if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
 async function logStart() {
   if (!supabase) return;
   try {
-    const { data, error } = await supabase.from('sync_logs').insert({ status: 'running' }).select('id').single();
+    const { data, error } = await supabase.from('sync_logs')
+      .insert({ status: 'running', shard: SHARD_INDEX, mode: MODE }).select('id').single();
     if (error) throw error;
     syncLogId = data.id;
   } catch (err) { console.warn(`[!] sync_logs insert gagal: ${err.message}`); }
@@ -156,6 +238,8 @@ async function logFinish(stats, status, errorMessage) {
       episodes_added: stats.episodesAdded,
       status,
       error: errorMessage || null,
+      shard: SHARD_INDEX,
+      mode: MODE,
     };
     if (syncLogId) await supabase.from('sync_logs').update(row).eq('id', syncLogId);
     else await supabase.from('sync_logs').insert(row);
@@ -166,10 +250,15 @@ async function logFinish(stats, status, errorMessage) {
 }
 async function persistHash(animeId, hash) {
   cache.hashes[animeId] = hash;
+  cacheDirty = true;
   if (!supabase) return;
   try {
     await supabase.from('sync_hashes').upsert({ anime_id: animeId, hash, updated_at: new Date().toISOString() });
   } catch { /* tabel belum dibuat = lewati senyap */ }
+}
+/** Hash per episode: payload identik -> tidak dikirim ulang. */
+function episodeHash(payload) {
+  return sha256([payload.streamUrl || '', payload.downloadUrl || '', (payload.subtitles || []).map((s) => s.url).join(',')].join('|'));
 }
 
 /* ---------------- metadata: AniList (cache TTL) -> Kitsu ---------------- */
@@ -208,6 +297,11 @@ async function anilistPost(query, variables) {
     body: JSON.stringify({ query, variables }),
     signal: AbortSignal.timeout(30000),
   });
+  if (res.status === 429) {
+    const ra = Number(res.headers.get('retry-after'));
+    await sleep(Number.isFinite(ra) && ra > 0 ? Math.min(60000, ra * 1000) : 5000);
+    throw new Error('AniList HTTP 429');
+  }
   if (!res.ok) throw new Error(`AniList HTTP ${res.status}`);
   const json = await res.json();
   return (json.data || {}).Media || null;
@@ -218,7 +312,7 @@ async function anilistByMal(malId) {
   if (hit && Date.now() - hit.at < ANILIST_META_TTL_MS) return hit.meta;
   try {
     const meta = shapeAniList(await anilistPost(ANILIST_QUERY_BY_MAL, { id: Number(malId) }));
-    if (meta) cache.anilist[key] = { at: Date.now(), meta };
+    if (meta) { cache.anilist[key] = { at: Date.now(), meta }; cacheDirty = true; }
     return meta;
   } catch { return null; }
 }
@@ -228,7 +322,7 @@ async function anilistSearch(title) {
   if (hit && Date.now() - hit.at < ANILIST_META_TTL_MS) return hit.meta;
   try {
     const meta = shapeAniList(await anilistPost(ANILIST_QUERY_SEARCH, { search: title }), title);
-    if (meta) cache.anilist[key] = { at: Date.now(), meta };
+    if (meta) { cache.anilist[key] = { at: Date.now(), meta }; cacheDirty = true; }
     return meta;
   } catch { return null; }
 }
@@ -237,7 +331,7 @@ async function malOfAnilist(anilistId) {
   if (cache.malByAnimeId[anilistId]) return cache.malByAnimeId[anilistId];
   try {
     const m = await anilistPost(ANILIST_QUERY_BY_ID, { id: Number(anilistId) });
-    if (m && m.idMal) { cache.malByAnimeId[anilistId] = m.idMal; return m.idMal; }
+    if (m && m.idMal) { cache.malByAnimeId[anilistId] = m.idMal; cacheDirty = true; return m.idMal; }
   } catch { /* abaikan */ }
   return null;
 }
@@ -345,8 +439,7 @@ async function extract9anime(pageHtml, pageUrl) {
     const sm = embedHtml.match(/(https?:\/\/[^\s'"]+\/stream\/[^\s'"]+)/);
     if (!sm) return null;
     // Ikuti redirect TANPA mengunduh badan berkas: MP4 di ujung
-    // rantai berukuran ratusan MB — cukup URL akhirnya saja
-    // (setara client.stream di scraper.py yang langsung ditutup).
+    // rantai berukuran ratusan MB — cukup URL akhirnya saja.
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 20000);
     let finalUrl = '';
@@ -368,9 +461,8 @@ const firstIframeSrc = (html, base) => {
 };
 const ogImage = (html) => (String(html || '').match(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i) || [])[1] || '';
 
-/** Satu halaman episode WordPress (gogo/9anime) -> payload, port alur scraper.py.
- *  enrich=false untuk judul yang sudah ada (metadatanya tidak
- *  perlu diambil ulang — hemat panggilan AniList/Kitsu). */
+/** Satu halaman episode WordPress (gogo/9anime) -> payload.
+ *  enrich=false untuk judul yang sudah ada (hemat AniList). */
 async function scrapeWpEpisode(pageUrl, title, ep, { enrich = true } = {}) {
   const { text: html } = await fetchText(pageUrl, { retries: 2 });
   const thumbnail = ogImage(html);
@@ -431,39 +523,60 @@ async function loadDetail(id) {
   if (hit && Date.now() - hit.at < DETAIL_TTL_MS) return hit.data;
   const data = await fetchJson(`${API}?id=${encodeURIComponent(id)}&fresh=1`, { timeoutMs: 45000, retries: 1 });
   const detail = (data && data.data) || null;
-  if (detail) cache.details[id] = { at: Date.now(), data: detail };
+  if (detail) { cache.details[id] = { at: Date.now(), data: detail }; cacheDirty = true; }
   return detail;
 }
 async function apiPost(payload) {
   if (DRY_RUN) { console.log(`  [dry-run] POST ${payload.rawTitle} ep${payload.episodeNum}`); return { ok: true, dry: true }; }
-  try {
-    const res = await fetch(API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(60000),
-    });
-    const out = await res.json().catch(() => ({}));
-    if (res.status === 422) return { ok: false, error: out.error || 'HTTP 422', rejected: true };
-    if (!res.ok || !out.ok) return { ok: false, error: out.error || `HTTP ${res.status}` };
-    return out;
-  } catch (err) { return { ok: false, error: err.message }; }
+  let lastErr = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'User-Agent': UA },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(60000),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (res.status === 422) return { ok: false, error: out.error || 'HTTP 422', rejected: true };
+      if (res.status === 429 || res.status >= 500) { lastErr = `HTTP ${res.status}`; await sleep(2000 * (attempt + 1)); continue; }
+      if (!res.ok || !out.ok) return { ok: false, error: out.error || `HTTP ${res.status}` };
+      return out;
+    } catch (err) { lastErr = err.message; await sleep(1500); }
+  }
+  return { ok: false, error: lastErr };
 }
 
+/* ---------------- keadaan run (aman paralel: JS satu utas) ---------------- */
 const stats = { titlesChecked: 0, titlesUpdated: 0, episodesAdded: 0 };
 let budgetLeft = MAX_EPISODES;
 const addedLabels = [];
-async function take(label) {
+const touchedSlugs = new Set();
+/** Cadangkan 1 slot anggaran episode (sinkron, tanpa celah balapan). */
+function reserve() {
+  if (budgetLeft <= 0) return false;
   budgetLeft -= 1;
+  return true;
+}
+/** Kirim satu episode: dilewati bila hash episode identik
+ *  dengan yang pernah terkirim (tidak ada upsert percuma). */
+async function postEpisode(animeKey, payload, label) {
+  const hashKey = `${animeKey}:${payload.episodeNum}`;
+  const hash = episodeHash(payload);
+  if (!DRY_RUN && cache.epHashes[hashKey] === hash) return 'unchanged';
+  const out = await apiPost(payload);
+  if (!out.ok) { console.log(`  gagal POST ${label}: ${out.error || ''}`); return 'failed'; }
+  cache.epHashes[hashKey] = hash;
+  cacheDirty = true;
   stats.episodesAdded += 1;
   addedLabels.push(label);
+  touchedSlugs.add(animeKey);
   console.log(`DITAMBAH ${label}`);
-  await sleep(GAP_MS);
+  return 'added';
 }
 
-/* ---------------- hianimes.se ---------------- */
-async function syncHianime(catalog) {
-  console.log('=== hianimes.se ===');
+/* ---------------- peta situs (penemuan kandidat) ---------------- */
+async function hianimeMap() {
   const sitemap = (await fetchText('https://hianimes.se/sitemap.xml', { timeoutMs: 60000 })).text;
   const watchUrls = [...sitemap.matchAll(/<loc>(https:\/\/hianimes\.se\/watch\/[^<]+)<\/loc>/g)].map((m) => m[1]);
   const site = new Map();
@@ -474,88 +587,8 @@ async function syncHianime(catalog) {
     if (!site.has(m[1])) site.set(m[1], { eps: new Set(), url });
     site.get(m[1]).eps.add(Number(m[2]));
   }
-  const byTitle = new Map();
-  const byId = new Map(catalog.map((a) => [a.id, a]));
-  for (const a of catalog) byTitle.set(normTitle(a.title), a);
-  const match = (sslug) => byTitle.get(normTitle(sslug.replace(/-/g, ' ')));
-  const items = [...site.entries()].sort((a, b) => {
-    const ma = match(a[0]); const mb = match(b[0]);
-    if (!ma && !mb) return 0;
-    if (!ma) return 1;
-    if (!mb) return -1;
-    return (ma.episodeNumbers || []).length - (mb.episodeNumbers || []).length;
-  });
-  let seriesSeen = 0;
-  for (const [sslug, info] of items) {
-    if (budgetLeft <= 0) break;
-    if (LIMIT_SERIES && seriesSeen >= LIMIT_SERIES) break;
-    seriesSeen += 1;
-    stats.titlesChecked += 1;
-    const anime = match(sslug);
-    const siteEps = [...info.eps].sort((x, y) => x - y);
-    if (anime) {
-      // Hash inkremental: judul sama + episode situs sama +
-      // updatedAt katalog sama = tidak ada yang berubah.
-      const fingerprint = sha256(`${anime.id}|${anime.updatedAt || ''}|${siteEps.join(',')}|${(anime.episodeNumbers || []).join(',')}`);
-      if (cache.hashes[anime.id] === fingerprint) continue;
-      const have = new Set(anime.episodeNumbers || []);
-      const missing = siteEps.filter((n) => !have.has(n));
-      const finished = String(anime.status || '').toUpperCase() === 'FINISHED'
-        || (anime.totalEpisodes && have.size >= anime.totalEpisodes);
-      if (finished && missing.length === 0) { await persistHash(anime.id, fingerprint); continue; }
-      if (!missing.length) { await persistHash(anime.id, fingerprint); continue; }
-      const detail = await loadDetail(anime.id);
-      if (!detail) continue;
-      if (!(detail.episodes || []).some((e) => String(e.streamUrl).includes('dramahot'))) continue; // sumber campuran: jangan campur
-      let mal = cache.malByAnimeId[anime.id] || null;
-      if (!mal && detail.anilistId) mal = await malOfAnilist(detail.anilistId);
-      if (!mal) continue;
-      let updated = false;
-      for (const ep of missing) {
-        if (budgetLeft <= 0) break;
-        const embed = `https://zokoanime.video/stream/mal/${mal}/${ep}/sub`;
-        const cfg = decodePlayerConfig((await fetchText(embed, { retries: 1 })).text);
-        const src = cfg && cfg.src;
-        if (!src) continue;
-        const out = await apiPost({
-          rawTitle: detail.rawTitle, episodeNum: ep, streamUrl: src,
-          downloadUrl: cfg.download_url || null, headers: { Referer: embed },
-          subtitles: mapZokoSubtitles(cfg), meta: null,
-        });
-        if (out.ok) { await take(`${anime.title} ep${ep} (hianime)`); updated = true; }
-        else console.log(`  gagal POST ${anime.title} ep${ep}: ${out.error || ''}`);
-      }
-      if (updated) stats.titlesUpdated += 1;
-      await persistHash(anime.id, fingerprint);
-    } else {
-      const titleGuess = sslug.replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
-      const html = (await fetchText(info.url, { retries: 1 })).text;
-      const m = html.match(/zokoanime\.video\/stream\/mal\/(\d+)\//);
-      if (!m) continue;
-      const mal = m[1];
-      const meta = await enrichNewTitle(mal, titleGuess);
-      if (!meta || !meta.poster) { console.log(`  tunda judul baru ${titleGuess}: thumbnail belum tersedia`); continue; }
-      let updated = false;
-      for (const ep of siteEps.slice(0, 3)) {
-        if (budgetLeft <= 0) break;
-        const embed = `https://zokoanime.video/stream/mal/${mal}/${ep}/sub`;
-        const cfg = decodePlayerConfig((await fetchText(embed, { retries: 1 })).text);
-        const src = cfg && cfg.src;
-        if (!src) break;
-        const out = await apiPost({
-          rawTitle: titleGuess, episodeNum: ep, streamUrl: src,
-          downloadUrl: cfg.download_url || null, headers: { Referer: embed },
-          subtitles: mapZokoSubtitles(cfg), meta,
-        });
-        if (out.ok) { await take(`${meta.title || titleGuess} ep${ep} (hianime, BARU)`); updated = true; }
-        else break;
-      }
-      if (updated) stats.titlesUpdated += 1;
-    }
-  }
+  return site;
 }
-
-/* ---------------- WordPress: gogoanime / 9anime ---------------- */
 async function wpEpisodeMap(home, pattern) {
   const rx = new RegExp(pattern);
   const urls = new Set();
@@ -585,91 +618,231 @@ async function wpEpisodeMap(home, pattern) {
   }
   return series;
 }
-async function syncWp(name, home, pattern, hostMarker, catalog) {
-  console.log(`=== ${name} ===`);
-  const site = await wpEpisodeMap(home, pattern);
-  const bySlug = new Map(catalog.map((a) => [a.id, a]));
-  const ordered = [...site.entries()].sort((a, b) => {
-    const ma = bySlug.get(a[0]); const mb = bySlug.get(b[0]);
-    if (!ma && !mb) return 0;
-    if (!ma) return 1;
-    if (!mb) return -1;
-    return (ma.episodeNumbers || []).length - (mb.episodeNumbers || []).length;
-  });
-  let seriesSeen = 0;
-  for (const [sslug, eps] of ordered) {
-    if (budgetLeft <= 0) break;
-    if (LIMIT_SERIES && seriesSeen >= LIMIT_SERIES) break;
-    seriesSeen += 1;
-    if (sslug.includes('hentai')) continue;
-    stats.titlesChecked += 1;
-    const epNums = Object.keys(eps).map(Number);
-    const template = eps[Math.max(...epNums)];
-    const urlFor = (n) => eps[n] || template.replace(/episode-\d+/, `episode-${n}`);
-    const anime = bySlug.get(sslug);
-    if (anime) {
-      const have = new Set(anime.episodeNumbers || []);
-      const targets = [];
-      for (let n = 1; n <= Math.max(...epNums); n++) if (!have.has(n)) targets.push(n);
-      if (!targets.length) continue;
-      const detail = await loadDetail(anime.id);
-      if (!detail) continue;
-      if ((detail.episodes || []).length && !(detail.episodes || []).some((e) => String(e.streamUrl).includes(hostMarker))) continue;
-      let updated = false;
-      for (const ep of targets) {
-        if (budgetLeft <= 0) break;
-        try {
-          const payload = await scrapeWpEpisode(urlFor(ep), detail.rawTitle, ep, { enrich: false });
-          payload.rawTitle = detail.rawTitle;
-          payload.meta = null; // judul lama: metadata server dipertahankan
-          const out = await apiPost(payload);
-          if (out.ok) { await take(`${anime.title} ep${ep} (${name})`); updated = true; }
-          else console.log(`  gagal POST ${anime.title} ep${ep}: ${out.error || ''}`);
-        } catch (err) { console.log(`  gagal ${name} ${anime.title} ep${ep}: ${err.message}`); await sleep(3000); }
+
+/** Bangun daftar kandidat gabungan (deterministik).
+ *  Item: { key, catalog|null, hianime?, gogoanime?, '9anime'? } */
+async function buildWork(catalog) {
+  const byId = new Map(catalog.map((a) => [a.id, a]));
+  const byTitle = new Map(catalog.map((a) => [normTitle(a.title), a]));
+  const items = new Map();
+  const getItem = (key, anime) => {
+    if (!items.has(key)) items.set(key, { key, catalog: anime || null });
+    const it = items.get(key);
+    if (anime && !it.catalog) it.catalog = anime;
+    return it;
+  };
+  const sourcesState = { hianime: false, gogoanime: false, '9anime': false };
+  if (!ONLY_SOURCE || ONLY_SOURCE === 'hianime') {
+    try {
+      const site = await hianimeMap();
+      sourcesState.hianime = true;
+      for (const [sslug, info] of site) {
+        const anime = byTitle.get(normTitle(sslug.replace(/-/g, ' '))) || null;
+        getItem(anime ? anime.id : `h:${sslug}`, anime).hianime = { sslug, ...info };
       }
-      if (updated) stats.titlesUpdated += 1;
-    } else {
-      const title = sslug.replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
-      for (let ep = 1; ep <= 2; ep++) {
-        if (budgetLeft <= 0) break;
-        try {
-          const payload = await scrapeWpEpisode(urlFor(ep), title, ep);
-          if (!(payload.meta && payload.meta.poster) && !payload.thumbnail) {
-            console.log(`  tunda judul baru ${title}: thumbnail belum tersedia`);
-            break;
-          }
-          const out = await apiPost(payload);
-          if (out.ok) { await take(`${title} ep${ep} (${name}, BARU)`); stats.titlesUpdated += 1; }
-          else break;
-        } catch { break; }
+    } catch (err) { console.error(`[!] Peta hianime gagal: ${err.message}`); }
+  }
+  const wpDefs = [
+    ['gogoanime', 'https://gogoanime.or.at', '/([a-z0-9-]+)-episode-(\\d+)/?$'],
+    ['9anime', 'https://9anime.or.at', '/([a-z0-9-]+)-episode-(\\d+)-english-subbed/?$'],
+  ];
+  for (const [name, home, pattern] of wpDefs) {
+    if (ONLY_SOURCE && ONLY_SOURCE !== name) continue;
+    try {
+      const site = await wpEpisodeMap(home, pattern);
+      sourcesState[name] = true;
+      for (const [sslug, eps] of site) {
+        if (sslug.includes('hentai')) continue;
+        const anime = byId.get(sslug) || null;
+        getItem(anime ? anime.id : `w:${sslug}`, anime)[name] = { sslug, eps };
       }
+    } catch (err) { console.error(`[!] Peta ${name} gagal: ${err.message}`); }
+  }
+  let all = [...items.values()];
+  if (MODE === 'fast') {
+    // Mode cepat: hanya yang sedang tayang. Status kosong
+    // (belum diketahui) dan judul baru ikut — full harian
+    // tetap memeriksa semuanya.
+    all = all.filter((it) => {
+      if (!it.catalog) return true;
+      const st = String(it.catalog.status || '').toUpperCase();
+      return st === 'RELEASING' || st === '';
+    });
+  }
+  all.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  const keys = all.map((it) => it.key);
+  const mine = new Set(shardSlice(keys, SHARD_INDEX, SHARD_TOTAL));
+  return { items: all.filter((it) => mine.has(it.key)), sourcesState, totalCandidates: all.length };
+}
+
+/* ---------------- proses per judul: hianime ---------------- */
+async function processHianime(item) {
+  const { hianime: info, catalog: anime } = item;
+  if (!info) return;
+  stats.titlesChecked += 1;
+  const siteEps = [...info.eps].sort((x, y) => x - y);
+  if (anime) {
+    const fingerprint = sha256(`${anime.id}|${anime.updatedAt || ''}|${siteEps.join(',')}|${(anime.episodeNumbers || []).join(',')}`);
+    if (cache.hashes[anime.id] === fingerprint) return;
+    const have = new Set(anime.episodeNumbers || []);
+    const missing = siteEps.filter((n) => !have.has(n));
+    const finished = String(anime.status || '').toUpperCase() === 'FINISHED'
+      || (anime.totalEpisodes && have.size >= anime.totalEpisodes);
+    if (!missing.length || finished) { await persistHash(anime.id, fingerprint); return; }
+    const detail = await loadDetail(anime.id);
+    if (!detail) return;
+    if (!(detail.episodes || []).some((e) => String(e.streamUrl).includes('dramahot'))) return; // jangan campur sumber
+    let mal = cache.malByAnimeId[anime.id] || null;
+    if (!mal && detail.anilistId) mal = await malOfAnilist(detail.anilistId);
+    if (!mal) return;
+    let updated = false;
+    for (const ep of missing) {
+      if (!reserve()) break;
+      const embed = `https://zokoanime.video/stream/mal/${mal}/${ep}/sub`;
+      const cfg = decodePlayerConfig((await fetchText(embed, { retries: 1 })).text);
+      const src = cfg && cfg.src;
+      if (!src) continue;
+      const r = await postEpisode(anime.id, {
+        rawTitle: detail.rawTitle, episodeNum: ep, streamUrl: src,
+        downloadUrl: cfg.download_url || null, headers: { Referer: embed },
+        subtitles: mapZokoSubtitles(cfg), meta: null,
+      }, `${anime.title} ep${ep} (hianime)`);
+      if (r === 'added') updated = true;
+    }
+    if (updated) stats.titlesUpdated += 1;
+    await persistHash(anime.id, fingerprint);
+  } else {
+    const titleGuess = info.sslug.replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
+    const html = (await fetchText(info.url, { retries: 1 })).text;
+    const m = html.match(/zokoanime\.video\/stream\/mal\/(\d+)\//);
+    if (!m) return;
+    const mal = m[1];
+    const meta = await enrichNewTitle(mal, titleGuess);
+    if (!meta || !meta.poster) { console.log(`  tunda judul baru ${titleGuess}: thumbnail belum tersedia`); return; }
+    const key = slugify(meta.title || titleGuess);
+    let updated = false;
+    for (const ep of siteEps.slice(0, 3)) {
+      if (!reserve()) break;
+      const embed = `https://zokoanime.video/stream/mal/${mal}/${ep}/sub`;
+      const cfg = decodePlayerConfig((await fetchText(embed, { retries: 1 })).text);
+      const src = cfg && cfg.src;
+      if (!src) break;
+      const r = await postEpisode(key, {
+        rawTitle: titleGuess, episodeNum: ep, streamUrl: src,
+        downloadUrl: cfg.download_url || null, headers: { Referer: embed },
+        subtitles: mapZokoSubtitles(cfg), meta,
+      }, `${meta.title || titleGuess} ep${ep} (hianime, BARU)`);
+      if (r === 'added') updated = true; else if (r === 'failed') break;
+    }
+    if (updated) stats.titlesUpdated += 1;
+  }
+}
+
+/* ---------------- proses per judul: WordPress ---------------- */
+async function processWp(item, name, hostMarker) {
+  const data = item[name];
+  if (!data) return;
+  stats.titlesChecked += 1;
+  const eps = data.eps;
+  const epNums = Object.keys(eps).map(Number);
+  if (!epNums.length) return;
+  const template = eps[Math.max(...epNums)];
+  const urlFor = (n) => eps[n] || template.replace(/episode-\d+/, `episode-${n}`);
+  const anime = item.catalog;
+  if (anime) {
+    const have = new Set(anime.episodeNumbers || []);
+    const targets = [];
+    for (let n = 1; n <= Math.max(...epNums); n++) if (!have.has(n)) targets.push(n);
+    if (!targets.length) return;
+    const detail = await loadDetail(anime.id);
+    if (!detail) return;
+    if ((detail.episodes || []).length && !(detail.episodes || []).some((e) => String(e.streamUrl).includes(hostMarker))) return;
+    let updated = false;
+    for (const ep of targets) {
+      if (!reserve()) break;
+      try {
+        const payload = await scrapeWpEpisode(urlFor(ep), detail.rawTitle, ep, { enrich: false });
+        payload.rawTitle = detail.rawTitle;
+        payload.meta = null;
+        const r = await postEpisode(anime.id, payload, `${anime.title} ep${ep} (${name})`);
+        if (r === 'added') updated = true;
+      } catch (err) { console.log(`  gagal ${name} ${anime.title} ep${ep}: ${err.message}`); }
+    }
+    if (updated) stats.titlesUpdated += 1;
+  } else {
+    const title = data.sslug.replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
+    const key = slugify(title);
+    for (let ep = 1; ep <= 2; ep++) {
+      if (!reserve()) break;
+      try {
+        const payload = await scrapeWpEpisode(urlFor(ep), title, ep);
+        if (!(payload.meta && payload.meta.poster) && !payload.thumbnail) {
+          console.log(`  tunda judul baru ${title}: thumbnail belum tersedia`);
+          break;
+        }
+        const r = await postEpisode(key, payload, `${title} ep${ep} (${name}, BARU)`);
+        if (r === 'added') stats.titlesUpdated += 1;
+        else if (r === 'failed') break;
+      } catch { break; }
+    }
+  }
+}
+
+/* ---------------- revalidate situs ---------------- */
+async function revalidateTouched() {
+  if (DRY_RUN || stats.episodesAdded === 0) return;
+  const secret = process.env.REVALIDATE_SECRET || '';
+  if (!secret) { console.log('[i] REVALIDATE_SECRET belum diisi — revalidate dilewati (halaman segar sendiri <=120 dtk).'); return; }
+  const slugs = [...touchedSlugs].slice(0, 100);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${SITE_ORIGIN}/api/revalidate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-revalidate-secret': secret, 'User-Agent': UA },
+        body: JSON.stringify({ slugs }),
+        signal: AbortSignal.timeout(30000),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (res.ok && out.ok) { console.log(`revalidate OK untuk ${slugs.length} judul`); return; }
+      console.warn(`[!] revalidate balas HTTP ${res.status}: ${out.error || ''}`);
+      return;
+    } catch (err) {
+      if (attempt === 1) console.warn(`[!] revalidate gagal: ${err.message}`);
+      else await sleep(2000);
     }
   }
 }
 
 /* ---------------- main ---------------- */
 async function main() {
-  console.log(`--- Sinkron2.0 mulai (batas ${MAX_EPISODES} episode${DRY_RUN ? ', dry-run' : ''}) ---`);
+  console.log(`--- Sinkron2.0 v2 mulai | mode=${MODE} shard=${SHARD_INDEX}/${SHARD_TOTAL} konkurensi=${CONCURRENCY} batas=${MAX_EPISODES}/shard${DRY_RUN ? ' DRY-RUN' : ''} ---`);
   await logStart();
   const catalog = await loadCatalog();
   console.log(`katalog saat ini: ${catalog.length} judul`);
-  const sources = [
-    ['hianime', () => syncHianime(catalog)],
-    ['gogoanime', () => syncWp('gogoanime', 'https://gogoanime.or.at', '/([a-z0-9-]+)-episode-(\\d+)/?$', 'nexabloom', catalog)],
-    ['9anime', () => syncWp('9anime', 'https://9anime.or.at', '/([a-z0-9-]+)-episode-(\\d+)-english-subbed/?$', '1anime', catalog)],
-  ];
-  let sourcesOk = 0;
-  let lastError = null;
-  for (const [name, run] of sources) {
-    if (ONLY_SOURCE && ONLY_SOURCE !== name) continue;
-    if (budgetLeft <= 0) break;
-    try { await run(); sourcesOk += 1; }
-    catch (err) { lastError = err; console.error(`[!] Sumber ${name} gagal: ${err.message}`); }
-  }
+  const { items, sourcesState, totalCandidates } = await buildWork(catalog);
+  console.log(`kandidat mode ${MODE}: ${totalCandidates} judul -> shard ini: ${items.length} judul`);
+  const sourcesOk = Object.values(sourcesState).filter(Boolean).length;
+  const limit = pLimit(CONCURRENCY);
+  const runSource = async (name, itemsForSource, fn) => {
+    const ordered = [...itemsForSource].sort((a, b) => {
+      const ea = a.catalog ? (a.catalog.episodeNumbers || []).length : Number.POSITIVE_INFINITY;
+      const eb = b.catalog ? (b.catalog.episodeNumbers || []).length : Number.POSITIVE_INFINITY;
+      return ea - eb;
+    });
+    const slice = LIMIT_SERIES ? ordered.slice(0, LIMIT_SERIES) : ordered;
+    console.log(`=== ${name}: ${slice.length} judul di shard ini ===`);
+    await Promise.all(slice.map((item) => limit(async () => {
+      try { await fn(item); } catch (err) { console.log(`  gagal ${name} ${item.key}: ${err.message}`); }
+    })));
+  };
+  if (sourcesState.hianime) await runSource('hianime', items.filter((i) => i.hianime), processHianime);
+  if (sourcesState.gogoanime) await runSource('gogoanime', items.filter((i) => i.gogoanime), (it) => processWp(it, 'gogoanime', 'nexabloom'));
+  if (sourcesState['9anime']) await runSource('9anime', items.filter((i) => i['9anime']), (it) => processWp(it, '9anime', '1anime'));
   await saveCache();
-  console.log(`--- Sinkron2.0 selesai: ${stats.episodesAdded} episode ditambahkan ---`);
+  await revalidateTouched();
+  console.log(`--- Sinkron2.0 selesai: ${stats.episodesAdded} episode ditambahkan (shard ${SHARD_INDEX}/${SHARD_TOTAL}) ---`);
   for (const label of addedLabels) console.log(`  + ${label}`);
-  if (sourcesOk === 0) throw new Error(lastError ? lastError.message : 'semua sumber gagal');
+  if (sourcesOk === 0) throw new Error('semua peta sumber gagal dimuat');
 }
 
 try {
