@@ -1,0 +1,65 @@
+name: Sinkron Penuh (harian)
+
+on:
+  schedule:
+    - cron: "23 19 * * *"
+  workflow_dispatch:
+    inputs:
+      max_episodes:
+        description: "Batas episode per shard"
+        required: false
+        default: "60"
+      concurrency:
+        description: "Paralel per shard"
+        required: false
+        default: "5"
+      dry_run:
+        description: "Dry run (tidak menulis ke katalog)"
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: sinkron-full
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ${{ vars.SYNC_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      SYNC_MODE: full
+      SHARD_TOTAL: "4"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Restore sync cache (per mode + per shard)
+        uses: actions/cache@v4
+        with:
+          path: .sync-cache.json
+          key: sync-cache-full-${{ matrix.shard }}-${{ github.run_id }}
+          restore-keys: |
+            sync-cache-full-${{ matrix.shard }}-
+      - name: Jalankan sinkron penuh (shard ${{ matrix.shard }})
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          REVALIDATE_SECRET: ${{ secrets.REVALIDATE_SECRET }}
+          SHARD_INDEX: ${{ matrix.shard }}
+          CONCURRENCY: ${{ inputs.concurrency || '5' }}
+          SYNC_MAX: ${{ inputs.max_episodes || '60' }}
+        run: node scripts/sync.mjs ${{ inputs.dry_run && '--dry-run' || '' }}
