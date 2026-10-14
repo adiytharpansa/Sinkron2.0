@@ -1,0 +1,29 @@
+name: Keepalive repo
+
+on:
+  schedule:
+    - cron: "17 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Commit keepalive bulanan
+        run: |
+          printf 'keepalive: %s\n' "$(date -u +%Y-%m-%d)" > .keepalive
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .keepalive
+          if git diff --cached --quiet; then
+            echo "Tidak ada perubahan (sudah pernah jalan bulan ini)."
+          else
+            git commit -m "keepalive: aktivitas bulanan agar jadwal Actions tidak dinonaktifkan"
+            git push
+          fi
