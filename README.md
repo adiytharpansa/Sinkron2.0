@@ -1,1 +1,98 @@
-IyBTaW5rcm9uMi4wCgpTaW5rcm9uIG90b21hdGlzIGthdGFsb2cgW215LWFuaW1lXShodHRwczovL215LWFuaW1lLWFwcC5hZGl5dGgtYXJwYW5zYS53b3JrZXJzLmRldikKeWFuZyBiZXJqYWxhbiBkaSAqKkdpdEh1YiBBY3Rpb25zKiog4oCUIG1lbmdnYW50aWthbiBjcm9uIGxhbWEgZGkgVk0KKGBhdXRvX3N5bmMucHlgIHRpYXAgMTUgbWVuaXQpIGRhbiB0aWRhayBsYWdpIG1lbWFrYWkgamF0YWggcmVxdWVzdApDbG91ZGZsYXJlIFdvcmtlciB1bnR1ayBzY3JhcGluZy4KCi0gYHNjcmlwdHMvc3luYy5tanNgIOKAlCBza3JpcCBzaW5rcm9uIG1hbmRpcmkgKE5vZGUgMjAsIEVTIG1vZHVsZSkuCiAgUG9ydCBwZW51aCBsb2dpa2EgYGF1dG9fc3luYy5weWAgKyBgc2NyYXBlci5weWA6CiAgLSAqKmhpYW5pbWVzLnNlKiog4oCUIHNpdGVtYXAgYC93YXRjaC9gIOKGkiBNQUwgaWQg4oaSIGVtYmVkIFpva28KICAgIChkZWtvZGUga29uZmlndXJhc2kgYF9fUGA6IGJhc2U2NCArIFhPUikg4oaSIG0zdTggYXNsaSArIHN1YnRpdGxlLgogIC0gKipnb2dvYW5pbWUub3IuYXQqKiDigJQgc2l0ZW1hcCBXb3JkUHJlc3Mg4oaSIE1lZ2FQbGF5CiAgICAoYGdldFNvdXJjZXNOZXdgLCBkZWtyaXBzaSBBRVMtMjU2LUNCQykg4oaSIG0zdTggYXNsaS4KICAtICoqOWFuaW1lLm9yLmF0Kiog4oCUIEFKQVggZGFmdGFyIHNlcnZlciDihpIgZW1iZWQgUGx5ciDihpIKICAgIHJlZGlyZWN0IOKGkiBNUDQgbGFuZ3N1bmcuCiAgLSBNZXRhZGF0YSBkYXJpICoqQW5pTGlzdCoqIChjYWNoZSBUVEwgNyBoYXJpKSwgY2FkYW5nYW4gKipLaXRzdSoqCiAgICBkZW5nYW4gcGVuamFnYSByZWxldmFuc2kuIEp1ZHVsIGJhcnUgdGFucGEgcG9zdGVyIGRpdHVuZGEKICAgIChnZXJiYW5nIHRodW1ibmFpbCB5YW5nIHNhbWEgc2VwZXJ0aSBkaSBzZXJ2ZXIpLgotIEVwaXNvZGUgYmFydSBkaWtpcmltIGtlIEFQSSBhcGxpa2FzaSAoYFBPU1QgL2FwaS9hbmltZWApIHlhbmcKICBtZW55aW1wYW5ueWEgcGVyIGp1ZHVsIOKAlCBwb2xhIHR1bGlzIHlhbmcgc3VkYWggaGVtYXQga3VvdGEgRDEuCgojIyBLZW5hcGEga2F0YWxvZyB0aWRhayBkaS11cHNlcnQgbGFuZ3N1bmcga2UgU3VwYWJhc2U/CgpTaXR1cyBteS1hbmltZSBtZW1iYWNhIGthdGFsb2cgZGFyaSBzdG9yZSBhcGxpa2FzaW55YSBzZW5kaXJpCihEMS9LViBsZXdhdCBgL2FwaS9hbmltZWApOyAqKnRpZGFrIGFkYSB0YWJlbCBhbmltZS9lcGlzb2RlcyBkaQpTdXBhYmFzZSoqLCBqYWRpIG1lbnVsaXMga2F0YWxvZyBrZSBTdXBhYmFzZSB0aWRhayBha2FuIHRhbXBpbCBkaSB3ZWIuClN1cGFiYXNlIGRpcGFrYWkgdW50dWsgeWFuZyBtZW1hbmcgcGVyYW5ueWEgZGkgc3Blc2lmaWthc2kgaW5pOgoKLSBgc3luY19sb2dzYCDigJQgc2F0dSBiYXJpcyBwZXIgcnVuIChtdWxhaSwgc2VsZXNhaSwganVtbGFoIGp1ZHVsCiAgZGlwZXJpa3NhL2RpcGVyYmFydWksIGVwaXNvZGUgZGl0YW1iYWgsIHN0YXR1cywgZXJyb3IpLgotIGBzeW5jX2hhc2hlc2Ag4oCUIGNlcm1pbiBoYXNoIGlua3JlbWVudGFsIHBlciBqdWR1bC4KLSBTYXR1IHF1ZXJ5IHJpbmdhbiBkaSBha2hpciBydW4gbWVuamFnYSBwcm95ZWsgU3VwYWJhc2UgZ3JhdGlzCiAgdGlkYWsgdGVyLSpwYXVzZSoga2FyZW5hIG1lbmdhbmdndXIuCgojIyBTaW5rcm9uIGlua3JlbWVudGFsIChoZW1hdCBrdW90YSkKCi0gS2VhZGFhbiBrYXRhbG9nIGRpYmFjYSBkYXJpICoqc2F0dSoqIGBHRVQgL2FwaS9hbmltZWAgKHRlci1jYWNoZQogIHRlcGkgMTIwIGRldGlrKS4gUmluZ2thc2FubnlhIG1lbXVhdCBgZXBpc29kZU51bWJlcnNgLCBgc3RhdHVzYCwKICBkYW4gYHRvdGFsRXBpc29kZXNgIHBlciBqdWR1bCDigJQgdGlkYWsgYWRhIGxhZ2kgcmF0dXNhbiBHRVQgZGV0YWlsCiAgcGVyIHJ1biB5YW5nIGR1bHUgbWVtYmFrYXIga3VvdGEgYmFjYSBEMS4KLSBIYXNoIHNoYTI1NiBwZXIganVkdWwgZGlzaW1wYW4gZGkgYC5zeW5jLWNhY2hlLmpzb25gCiAgKGRpcGVydGFoYW5rYW4gYW50YXItcnVuIG9sZWggYGFjdGlvbnMvY2FjaGVgKSBkYW4gZGljZXJtaW5rYW4ga2UKICBgc3luY19oYXNoZXNgLiBKdWR1bCB5YW5nIGhhc2gtbnlhIHRpZGFrIGJlcnViYWggZGlsZXdhdGkgdGFucGEKICBtZW5nYW1iaWwgc2F0dSBoYWxhbWFuIHB1bi4KLSBKdWR1bCBgRklOSVNIRURgIHlhbmcgZXBpc29kZW55YSBzdWRhaCBsZW5na2FwIGRpbGV3YXRpLgotIEdFVCBkZXRhaWwgaGFueWEgZGlhbWJpbCB1bnR1ayBqdWR1bCB5YW5nIGJlbmFyLWJlbmFyIGFrYW4KICBkaXRhbWJhaCBlcGlzb2RlbnlhLgotIFBPU1QgZGliYXRhc2kgYFNZTkNfTUFYYCBlcGlzb2RlIHBlciBydW4gKGJhd2FhbiAyMCBhZ2FyIG11YXQKICBkaSBgdGltZW91dC1taW51dGVzOiAxMGApLCBkZW5nYW4gdGltZW91dCArIHJldHJ5IGJhY2tvZmYgZGFuCiAgamVkYSBzb3BhbiBhbnRhciByZXF1ZXN0LgoKIyMgU2V0dXAKCjEuICoqU1FMKiog4oCUIGphbGFua2FuIGBzdXBhYmFzZS9zeW5jX2xvZ3Muc3FsYCBzYXR1IGthbGkgZGkKICAgU3VwYWJhc2UgU1FMIEVkaXRvciAocHJveWVrIHlhbmcgc2FtYSBkZW5nYW4gYXBsaWthc2kpLgogICBSTFMgYWt0aWYgdGFucGEgcG9saWN5IHB1YmxpazsgaGFueWEgc2VydmljZSByb2xlIHlhbmcgbWVudWxpcy4KMi4gKipHaXRIdWIgU2VjcmV0cyoqIOKAlCBkaSByZXBvIGluaTogKlNldHRpbmdzIOKGkiBTZWNyZXRzIGFuZAogICB2YXJpYWJsZXMg4oaSIEFjdGlvbnMg4oaSIE5ldyByZXBvc2l0b3J5IHNlY3JldCo6CiAgIC0gYFNVUEFCQVNFX1VSTGAg4oCUIFVSTCBwcm95ZWsgU3VwYWJhc2UuCiAgIC0gYFNVUEFCQVNFX1NFUlZJQ0VfUk9MRV9LRVlgIOKAlCBrdW5jaSAqKnNlcnZpY2Vfcm9sZSoqCiAgICAgKFN1cGFiYXNlIOKGkiBQcm9qZWN0IFNldHRpbmdzIOKGkiBBUEkpLiBKYW5nYW4gcGVybmFoIG1lbmFydWgKICAgICBrdW5jaSBpbmkgZGkga29kZSwgZGkgc2lzaSBrbGllbiwgYXRhdSBkaSBjaGF0LgogICBUYW5wYSBrZWR1YSBzZWNyZXQgaW5pIHNpbmtyb24ga2F0YWxvZyB0ZXRhcCBqYWxhbjsgaGFueWEKICAgcGVuY2F0YXRhbiBrZSBgc3luY19sb2dzYCB5YW5nIGRpbGV3YXRpLgozLiAqKkphbGFua2FuIG1hbnVhbCoqIOKAlCB0YWIgKipBY3Rpb25zIOKGkiBTaW5rcm9uIG15LWFuaW1lIOKGkgogICBSdW4gd29ya2Zsb3cqKiAoYmlzYSBwaWxpaCBiYXRhcyBlcGlzb2RlIC8gbW9kZSBkcnktcnVuKS4KICAgU2V0ZWxhaCBpdHUgd29ya2Zsb3cgYmVyamFsYW4gc2VuZGlyaSB0aWFwIDMwIG1lbml0LgoKIyMgTWVuamFsYW5rYW4gZGkgbG9rYWwKCmBgYGJhc2gKbnBtIGNpCm5vZGUgc2NyaXB0cy9zeW5jLm1qcyAtLWRyeS1ydW4gLS1zb3VyY2UgOWFuaW1lIC0tbGltaXQtc2VyaWVzIDMKbm9kZSBzY3JpcHRzL3N5bmMubWpzIC0tbWF4IDUKYGBgCgpLZWx1YXIgZGVuZ2FuIGtvZGUgbm9uLW5vbCBiaWxhIHJ1biBnYWdhbCBmYXRhbCAoa2F0YWxvZyB0aWRhawp0ZXJiYWNhIGF0YXUgc2VtdWEgc3VtYmVyIGdhZ2FsKSBzZWhpbmdnYSBHaXRIdWIgbWVuZ2lyaW0Kbm90aWZpa2FzaSBrZWdhZ2FsYW4uCgojIyBTdGF0dXMgbWlncmFzaQoKLSBDcm9uIFZNIGxhbWEgYG15LWFuaW1lLWF1dG8tc3luY2AgKipkaW5vbmFrdGlma2FuKiogc2V0ZWxhaCByZXBvCiAgaW5pIHRlci1wdXNoIGRhbiBza3JpcCB0ZXJ1amkg4oCUIEFjdGlvbnMgYWRhbGFoIHNhdHUtc2F0dW55YQogIG1lc2luIHNpbmtyb24gc2VrYXJhbmcuCi0gRW5kcG9pbnQgYFBPU1QgL2FwaS9hbmltZWAgZGkgV29ya2VyICoqdGV0YXAgYWRhIGRhbiBtZW1hbmcKICBoYXJ1cyBhZGEqKjogaXR1IGphbHVyIHR1bGlzIGthdGFsb2dueWEgKGRpcGFrYWkgc2tyaXAgaW5pKS4KICBZYW5nIGRpaGFwdXMgZGFyaSBXb3JrZXIgYWRhbGFoICpwZW5qYWR3YWwqIHNpbmtyb25ueWEg4oCUCiAgV29ya2VyIG15LWFuaW1lIHNlamFrIGF3YWwgdGlkYWsgcHVueWEgY3JvbiBzaW5rcm9uIGJhd2FhbjsKICBzaW5rcm9uIHNlbGFsdSBiZXJqYWxhbiBkaSBsdWFyIChkdWx1IFZNLCBzZWthcmFuZyBBY3Rpb25zKS4KLSBIYWxhbWFuIHB1YmxpayB0aWRhayBiZXJ1YmFoIHNhbWEgc2VrYWxpICh0aWRhayBhZGEgcGVydWJhaGFuCiAgVUkpLCBkYW4ga2F0YWxvZyBkaWJhY2EgZGFyaSBjYWNoZSB0ZXBpIHNlcGVydGkgc2ViZWx1bW55YS4KLSBDYXRhdGFuIGJhdGFzOiBrdW90YSB0dWxpcyBoYXJpYW4gRDEgdGV0YXAgYmVybGFrdSB1bnR1awogIFBPU1Qga2F0YWxvZyAocmVzZXQgMDc6MDAgV0lCKSDigJQgaXR1IGJhdGFzIHBlbnlpbXBhbmFuIHNpdHVzLAogIGJ1a2FuIGJhdGFzIG1lc2luIHNpbmtyb24uIERhbiBzaXR1cyBzdW1iZXIgeWFuZyBtZW1ibG9raXIgSVAKICBwdXNhdCBkYXRhIGJpc2EgbWVub2xhayBzZWJhZ2lhbiBla3N0cmFrc2kgZGFyaSBJUCBHaXRIdWIKICAoc2FtYSBzZXBlcnRpIGRhcmkgVk0pOyBrZWdhZ2FsYW4gcGVyIGVwaXNvZGUgZGljYXRhdCBkaSBsb2cKICBydW4gQWN0aW9ucywgYnVrYW4gZGlzZW1idW55aWthbi4K
+# Sinkron2.0
+
+Sinkron otomatis katalog [my-anime](https://my-anime-app.adiyth-arpansa.workers.dev)
+yang berjalan di **GitHub Actions** — menggantikan cron lama di VM
+(`auto_sync.py` tiap 15 menit) dan tidak lagi memakai jatah request
+Cloudflare Worker untuk scraping.
+
+- `scripts/sync.mjs` — skrip sinkron mandiri (Node 20, ES module).
+  Port penuh logika `auto_sync.py` + `scraper.py`:
+  - **hianimes.se** — sitemap `/watch/` → MAL id → embed Zoko
+    (dekode konfigurasi `__P`: base64 + XOR) → m3u8 asli + subtitle.
+  - **gogoanime.or.at** — sitemap WordPress → MegaPlay
+    (`getSourcesNew`, dekripsi AES-256-CBC) → m3u8 asli.
+  - **9anime.or.at** — AJAX daftar server → embed Plyr →
+    redirect → MP4 langsung.
+  - Metadata dari **AniList** (cache TTL 7 hari), cadangan **Kitsu**
+    dengan penjaga relevansi. Judul baru tanpa poster ditunda
+    (gerbang thumbnail yang sama seperti di server).
+- Episode baru dikirim ke API aplikasi (`POST /api/anime`) yang
+  menyimpannya per judul — pola tulis yang sudah hemat kuota D1.
+
+## Kenapa katalog tidak di-upsert langsung ke Supabase?
+
+Situs my-anime membaca katalog dari store aplikasinya sendiri
+(D1/KV lewat `/api/anime`); **tidak ada tabel anime/episodes di
+Supabase**, jadi menulis katalog ke Supabase tidak akan tampil di web.
+Supabase dipakai untuk yang memang perannya di spesifikasi ini:
+
+- `sync_logs` — satu baris per run (mulai, selesai, jumlah judul
+  diperiksa/diperbarui, episode ditambah, status, error).
+- `sync_hashes` — cermin hash inkremental per judul.
+- Satu query ringan di akhir run menjaga proyek Supabase gratis
+  tidak ter-*pause* karena menganggur.
+
+## Sinkron inkremental (hemat kuota)
+
+- Keadaan katalog dibaca dari **satu** `GET /api/anime` (ter-cache
+  tepi 120 detik). Ringkasannya memuat `episodeNumbers`, `status`,
+  dan `totalEpisodes` per judul — tidak ada lagi ratusan GET detail
+  per run yang dulu membakar kuota baca D1.
+- Hash sha256 per judul disimpan di `.sync-cache.json`
+  (dipertahankan antar-run oleh `actions/cache`) dan dicerminkan ke
+  `sync_hashes`. Judul yang hash-nya tidak berubah dilewati tanpa
+  mengambil satu halaman pun.
+- Judul `FINISHED` yang episodenya sudah lengkap dilewati.
+- GET detail hanya diambil untuk judul yang benar-benar akan
+  ditambah episodenya.
+- POST dibatasi `SYNC_MAX` episode per run (bawaan 20 agar muat
+  di `timeout-minutes: 10`), dengan timeout + retry backoff dan
+  jeda sopan antar request.
+
+## Setup
+
+1. **SQL** — jalankan `supabase/sync_logs.sql` satu kali di
+   Supabase SQL Editor (proyek yang sama dengan aplikasi).
+   RLS aktif tanpa policy publik; hanya service role yang menulis.
+2. **GitHub Secrets** — di repo ini: *Settings → Secrets and
+   variables → Actions → New repository secret*:
+   - `SUPABASE_URL` — URL proyek Supabase.
+   - `SUPABASE_SERVICE_ROLE_KEY` — kunci **service_role**
+     (Supabase → Project Settings → API). Jangan pernah menaruh
+     kunci ini di kode, di sisi klien, atau di chat.
+   Tanpa kedua secret ini sinkron katalog tetap jalan; hanya
+   pencatatan ke `sync_logs` yang dilewati.
+3. **Jalankan manual** — tab **Actions → Sinkron my-anime →
+   Run workflow** (bisa pilih batas episode / mode dry-run).
+   Setelah itu workflow berjalan sendiri tiap 30 menit.
+
+## Menjalankan di lokal
+
+```bash
+npm ci
+node scripts/sync.mjs --dry-run --source 9anime --limit-series 3
+node scripts/sync.mjs --max 5
+```
+
+Keluar dengan kode non-nol bila run gagal fatal (katalog tidak
+terbaca atau semua sumber gagal) sehingga GitHub mengirim
+notifikasi kegagalan.
+
+## Status migrasi
+
+- Cron VM lama `my-anime-auto-sync` **dinonaktifkan** setelah repo
+  ini ter-push dan skrip teruji — Actions adalah satu-satunya
+  mesin sinkron sekarang.
+- Endpoint `POST /api/anime` di Worker **tetap ada dan memang
+  harus ada**: itu jalur tulis katalognya (dipakai skrip ini).
+  Yang dihapus dari Worker adalah *penjadwal* sinkronnya —
+  Worker my-anime sejak awal tidak punya cron sinkron bawaan;
+  sinkron selalu berjalan di luar (dulu VM, sekarang Actions).
+- Halaman publik tidak berubah sama sekali (tidak ada perubahan
+  UI), dan katalog dibaca dari cache tepi seperti sebelumnya.
+- Catatan batas: kuota tulis harian D1 tetap berlaku untuk
+  POST katalog (reset 07:00 WIB) — itu batas penyimpanan situs,
+  bukan batas mesin sinkron. Dan situs sumber yang memblokir IP
+  pusat data bisa menolak sebagian ekstraksi dari IP GitHub
+  (sama seperti dari VM); kegagalan per episode dicatat di log
+  run Actions, bukan disembunyikan.
