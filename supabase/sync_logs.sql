@@ -1,37 +1,43 @@
--- Sinkron2.0 — tabel log & keadaan sinkron my-anime.
--- Jalankan file ini SATU KALI di Supabase SQL Editor
--- (proyek Supabase yang sama dengan aplikasi my-anime).
+-- Sinkron2.0 — tabel log & keadaan sinkron di Supabase.
+-- Jalankan SEKALI di Supabase SQL Editor (aman dijalankan
+-- ulang: semua pernyataan idempoten).
 --
--- RLS aktif TANPA policy publik: anon/authenticated tidak
--- bisa membaca atau menulis tabel ini sama sekali. Hanya
--- service role (dipakai scripts/sync.mjs dari GitHub
--- Secrets) yang bisa — service role memang melewati RLS.
+-- Keamanan: RLS aktif TANPA policy publik — anon/authenticated
+-- tidak bisa membaca/menulis sama sekali. Hanya service role
+-- (dipakai GitHub Actions lewat secret) yang bisa, karena
+-- service role melewati RLS. Service role key TIDAK PERNAH
+-- masuk kode klien / aplikasi web.
 
 create table if not exists public.sync_logs (
-  id bigint generated always as identity primary key,
-  started_at timestamptz not null default now(),
-  finished_at timestamptz,
+  id             bigint generated always as identity primary key,
+  started_at     timestamptz not null default now(),
+  finished_at    timestamptz,
+  shard          integer not null default 0,
+  mode           text not null default 'full',
   titles_checked integer not null default 0,
   titles_updated integer not null default 0,
   episodes_added integer not null default 0,
-  status text not null default 'running'
-    check (status in ('running', 'success', 'failed')),
-  error text
+  status         text not null default 'running'
+                 check (status in ('running', 'success', 'failed')),
+  error          text
 );
 
-create index if not exists sync_logs_started_at_idx
-  on public.sync_logs (started_at desc);
+-- Untuk pemasangan lama (tabel dibuat sebelum ada shard/mode):
+alter table public.sync_logs add column if not exists shard integer not null default 0;
+alter table public.sync_logs add column if not exists mode  text    not null default 'full';
+
+create index if not exists sync_logs_started_idx on public.sync_logs (started_at desc);
+create index if not exists sync_logs_status_idx  on public.sync_logs (status, finished_at desc);
 
 alter table public.sync_logs enable row level security;
--- Sengaja TANPA policy: akses publik tertutup total.
+-- Sengaja TIDAK ada policy: akses publik tertutup total.
 
--- Keadaan hash inkremental per judul (cermin dari cache
--- lokal skrip; skrip tetap jalan walau tabel ini kosong).
+-- Hash per judul (cermin dari .sync-cache.json di Actions):
+-- judul yang hash-nya sama dilewati tanpa pengambilan apa pun.
 create table if not exists public.sync_hashes (
-  anime_id text primary key,
-  hash text not null,
+  anime_id   text primary key,
+  hash       text not null,
   updated_at timestamptz not null default now()
 );
-
 alter table public.sync_hashes enable row level security;
--- Sengaja TANPA policy: hanya service role.
+-- Sengaja TIDAK ada policy juga di sini.
