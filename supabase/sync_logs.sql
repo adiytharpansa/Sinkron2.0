@@ -1,1 +1,37 @@
-LS0gU2lua3JvbjIuMCDigJQgdGFiZWwgbG9nICYga2VhZGFhbiBzaW5rcm9uIG15LWFuaW1lLgotLSBKYWxhbmthbiBmaWxlIGluaSBTQVRVIEtBTEkgZGkgU3VwYWJhc2UgU1FMIEVkaXRvcgotLSAocHJveWVrIFN1cGFiYXNlIHlhbmcgc2FtYSBkZW5nYW4gYXBsaWthc2kgbXktYW5pbWUpLgotLQotLSBSTFMgYWt0aWYgVEFOUEEgcG9saWN5IHB1YmxpazogYW5vbi9hdXRoZW50aWNhdGVkIHRpZGFrCi0tIGJpc2EgbWVtYmFjYSBhdGF1IG1lbnVsaXMgdGFiZWwgaW5pIHNhbWEgc2VrYWxpLiBIYW55YQotLSBzZXJ2aWNlIHJvbGUgKGRpcGFrYWkgc2NyaXB0cy9zeW5jLm1qcyBkYXJpIEdpdEh1YgotLSBTZWNyZXRzKSB5YW5nIGJpc2Eg4oCUIHNlcnZpY2Ugcm9sZSBtZW1hbmcgbWVsZXdhdGkgUkxTLgoKY3JlYXRlIHRhYmxlIGlmIG5vdCBleGlzdHMgcHVibGljLnN5bmNfbG9ncyAoCiAgaWQgYmlnaW50IGdlbmVyYXRlZCBhbHdheXMgYXMgaWRlbnRpdHkgcHJpbWFyeSBrZXksCiAgc3RhcnRlZF9hdCB0aW1lc3RhbXB0eiBub3QgbnVsbCBkZWZhdWx0IG5vdygpLAogIGZpbmlzaGVkX2F0IHRpbWVzdGFtcHR6LAogIHRpdGxlc19jaGVja2VkIGludGVnZXIgbm90IG51bGwgZGVmYXVsdCAwLAogIHRpdGxlc191cGRhdGVkIGludGVnZXIgbm90IG51bGwgZGVmYXVsdCAwLAogIGVwaXNvZGVzX2FkZGVkIGludGVnZXIgbm90IG51bGwgZGVmYXVsdCAwLAogIHN0YXR1cyB0ZXh0IG5vdCBudWxsIGRlZmF1bHQgJ3J1bm5pbmcnCiAgICBjaGVjayAoc3RhdHVzIGluICgncnVubmluZycsICdzdWNjZXNzJywgJ2ZhaWxlZCcpKSwKICBlcnJvciB0ZXh0Cik7CgpjcmVhdGUgaW5kZXggaWYgbm90IGV4aXN0cyBzeW5jX2xvZ3Nfc3RhcnRlZF9hdF9pZHgKICBvbiBwdWJsaWMuc3luY19sb2dzIChzdGFydGVkX2F0IGRlc2MpOwoKYWx0ZXIgdGFibGUgcHVibGljLnN5bmNfbG9ncyBlbmFibGUgcm93IGxldmVsIHNlY3VyaXR5OwotLSBTZW5nYWphIFRBTlBBIHBvbGljeTogYWtzZXMgcHVibGlrIHRlcnR1dHVwIHRvdGFsLgoKLS0gS2VhZGFhbiBoYXNoIGlua3JlbWVudGFsIHBlciBqdWR1bCAoY2VybWluIGRhcmkgY2FjaGUKLS0gbG9rYWwgc2tyaXA7IHNrcmlwIHRldGFwIGphbGFuIHdhbGF1IHRhYmVsIGluaSBrb3NvbmcpLgpjcmVhdGUgdGFibGUgaWYgbm90IGV4aXN0cyBwdWJsaWMuc3luY19oYXNoZXMgKAogIGFuaW1lX2lkIHRleHQgcHJpbWFyeSBrZXksCiAgaGFzaCB0ZXh0IG5vdCBudWxsLAogIHVwZGF0ZWRfYXQgdGltZXN0YW1wdHogbm90IG51bGwgZGVmYXVsdCBub3coKQopOwoKYWx0ZXIgdGFibGUgcHVibGljLnN5bmNfaGFzaGVzIGVuYWJsZSByb3cgbGV2ZWwgc2VjdXJpdHk7Ci0tIFNlbmdhamEgVEFOUEEgcG9saWN5OiBoYW55YSBzZXJ2aWNlIHJvbGUuCg==
+-- Sinkron2.0 — tabel log & keadaan sinkron my-anime.
+-- Jalankan file ini SATU KALI di Supabase SQL Editor
+-- (proyek Supabase yang sama dengan aplikasi my-anime).
+--
+-- RLS aktif TANPA policy publik: anon/authenticated tidak
+-- bisa membaca atau menulis tabel ini sama sekali. Hanya
+-- service role (dipakai scripts/sync.mjs dari GitHub
+-- Secrets) yang bisa — service role memang melewati RLS.
+
+create table if not exists public.sync_logs (
+  id bigint generated always as identity primary key,
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  titles_checked integer not null default 0,
+  titles_updated integer not null default 0,
+  episodes_added integer not null default 0,
+  status text not null default 'running'
+    check (status in ('running', 'success', 'failed')),
+  error text
+);
+
+create index if not exists sync_logs_started_at_idx
+  on public.sync_logs (started_at desc);
+
+alter table public.sync_logs enable row level security;
+-- Sengaja TANPA policy: akses publik tertutup total.
+
+-- Keadaan hash inkremental per judul (cermin dari cache
+-- lokal skrip; skrip tetap jalan walau tabel ini kosong).
+create table if not exists public.sync_hashes (
+  anime_id text primary key,
+  hash text not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.sync_hashes enable row level security;
+-- Sengaja TANPA policy: hanya service role.
