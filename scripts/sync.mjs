@@ -554,6 +554,17 @@ function mapZokoSubtitles(cfg) {
   }
   return out;
 }
+/** URL unduh Zoko SELALU absolut: dari cfg.download_url
+ * (relatif -> absolut terhadap embed), atau pola pasti
+ * /download/mal/<id>/<ep>/sub dari embed /stream/mal/...
+ * Bentuk relatif terbukti 404 di origin aplikasi. */
+function zokoDownloadUrl(cfg, embed) {
+  try {
+    if (cfg && cfg.download_url) return new URL(cfg.download_url, embed).href;
+  } catch { /* lanjut ke pola */ }
+  if (embed && embed.includes('/stream/mal/')) return embed.replace('/stream/', '/download/');
+  return null;
+}
 const MEGAPLAY_KEY = Buffer.concat([Buffer.from('i?LMTAx0Q6,:}50U'), Buffer.alloc(16)]);
 const MEGAPLAY_IV = Buffer.from("W0;27ToaUpl_P%'c");
 async function extractMegaplay(embedHtml, embedUrl) {
@@ -650,6 +661,7 @@ async function scrapeWpEpisode(pageUrl, title, ep, { enrich = true } = {}) {
     if (!m) throw new Error('Link stream gagal diekstrak dari embed.');
     streamUrl = m[1];
   }
+  if (!downloadUrl && embedUrl.includes('/stream/mal/')) downloadUrl = embedUrl.replace('/stream/', '/download/');
   if (downloadUrl && (!/^https?:\/\//.test(downloadUrl) || downloadUrl.endsWith('.apk'))) downloadUrl = null;
   return {
     rawTitle: title, episodeNum: ep, thumbnail, streamUrl, downloadUrl,
@@ -850,7 +862,7 @@ async function processHianime(item) {
       if (!src) continue;
       const r = await postEpisode(anime.id, {
         rawTitle: detail.rawTitle, episodeNum: ep, streamUrl: src,
-        downloadUrl: cfg.download_url || null, headers: { Referer: embed },
+        downloadUrl: zokoDownloadUrl(cfg, embed), headers: { Referer: embed },
         subtitles: mapZokoSubtitles(cfg), meta: null,
       }, `${anime.title} ep${ep} (hianime)`);
       if (r === 'added') updated = true;
@@ -875,7 +887,7 @@ async function processHianime(item) {
       if (!src) break;
       const r = await postEpisode(key, {
         rawTitle: titleGuess, episodeNum: ep, streamUrl: src,
-        downloadUrl: cfg.download_url || null, headers: { Referer: embed },
+        downloadUrl: zokoDownloadUrl(cfg, embed), headers: { Referer: embed },
         subtitles: mapZokoSubtitles(cfg), meta,
       }, `${meta.title || titleGuess} ep${ep} (hianime, BARU)`);
       if (r === 'added') updated = true; else if (r === 'failed') break;
