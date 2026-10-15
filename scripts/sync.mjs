@@ -11,6 +11,9 @@
  *                      MegaPlay (AES-256-CBC) -> m3u8 asli
  *   - 9anime.or.at   : sitemap WordPress -> AJAX server ->
  *                      embed Plyr -> redirect -> MP4 langsung
+ * Metadata (isi celah, penjaga relevansi token): AniList ->
+ * Kitsu -> Bangumi (poster Asia/donghua) -> TVmaze (sinopsis
+ * Inggris/data episode) -> Shikimori (basis MAL, poster).
  * Episode baru dikirim ke API aplikasi
  * (POST https://my-anime-app.adiyth-arpansa.workers.dev/api/anime)
  * yang menyimpannya per judul ke katalog live (D1/KV aplikasi).
@@ -373,9 +376,144 @@ async function kitsuSearch(title) {
     };
   } catch { return null; }
 }
+async function fetchPostJson(url, body, { timeoutMs = 25000 } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'POST', signal: ctrl.signal, redirect: 'follow',
+      headers: { 'User-Agent': UA, Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return JSON.parse(await res.text());
+  } finally { clearTimeout(timer); }
+}
+const metaTokens = (x) => new Set(String(x || '').toLowerCase().match(/[a-z0-9]+/g) || []);
+function metaGuard(title, candidates) {
+  const q = metaTokens(title);
+  if (!q.size) return false;
+  const longest = [...q].sort((a, b) => b.length - a.length)[0];
+  const cand = new Set((candidates || []).flatMap((c) => [...metaTokens(c)]));
+  return cand.has(longest);
+}
+const SEASON_BY_MONTH_JS = KITSU_SEASON;
+function yearSeason(dateText) {
+  const start = String(dateText || '');
+  return {
+    year: /^\d{4}/.test(start) ? Number(start.slice(0, 4)) : null,
+    season: SEASON_BY_MONTH_JS[Number(start.slice(5, 7))] || null,
+  };
+}
+function emptyMeta(title) {
+  return {
+    anilistId: null, title, altTitles: [], poster: '', banner: '', synopsis: '',
+    genres: [], score: null, year: null, season: null, studio: null,
+    totalEpisodes: null, status: '', format: null,
+  };
+}
+async function bangumiSearch(title) {
+  // Poster Asia/donghua; sinopsis Mandarin/Jepang SENGAJA tidak diambil.
+  try {
+    const data = await fetchPostJson('https://api.bgm.tv/v0/search/subjects?limit=5',
+      { keyword: title, sort: 'match', filter: { type: [2] } });
+    for (const item of (data && data.data) || []) {
+      const aliases = [item.name, item.name_cn];
+      for (const row of item.infobox || []) {
+        const v = row && row.value;
+        if (typeof v === 'string') aliases.push(v);
+        else if (Array.isArray(v)) for (const x of v) { if (x && typeof x === 'object') { aliases.push(x.v, x.k); } else if (typeof x === 'string') aliases.push(x); }
+      }
+      if (!metaGuard(title, aliases)) continue;
+      const images = item.images || {};
+      const { year, season } = yearSeason(item.date);
+      const m = emptyMeta(title);
+      m.altTitles = aliases.filter((a) => a && a !== title).slice(0, 6);
+      m.poster = images.large || item.image || images.common || '';
+      m.score = item.rating && item.rating.score ? Math.round(Number(item.rating.score) * 10) / 10 : null;
+      m.year = year; m.season = season;
+      m.totalEpisodes = item.eps || item.total_episodes || null;
+      m.format = String(item.platform || '').toUpperCase() === 'TV' ? 'TV' : null;
+      return m;
+    }
+  } catch { /* gagal senyap: rantai lanjut */ }
+  return null;
+}
+async function tvmazeSearch(title) {
+  try {
+    const data = await fetchJson(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`, { retries: 1 });
+    for (const hit of data || []) {
+      const show = (hit && hit.show) || {};
+      if (!metaGuard(title, [show.name])) continue;
+      const image = show.image || {};
+      const { year, season } = yearSeason(show.premiered);
+      let totalEpisodes = null;
+      try {
+        const eps = await fetchJson(`https://api.tvmaze.com/shows/${show.id}/episodes`, { retries: 0 });
+        if (Array.isArray(eps)) totalEpisodes = eps.filter((e) => (e.season || 0) >= 1).length || null;
+      } catch { /* total episode kosong tidak fatal */ }
+      const m = emptyMeta(show.name || title);
+      m.poster = image.original || image.medium || '';
+      m.synopsis = String(show.summary || '').replace(/<[^>]+>/g, '').trim();
+      m.genres = show.genres || [];
+      m.score = (show.rating && show.rating.average) ?? null;
+      m.year = year; m.season = season;
+      m.totalEpisodes = totalEpisodes;
+      m.status = ({ Running: 'RELEASING', Ended: 'FINISHED' })[show.status] || '';
+      m.format = String(show.type || '').toLowerCase() === 'animation' ? 'TV' : null;
+      return m;
+    }
+  } catch { /* gagal senyap */ }
+  return null;
+}
+async function shikimoriSearch(title) {
+  // Basis MyAnimeList; poster missing_* dilewati; sinopsis Rusia tidak diambil.
+  try {
+    const data = await fetchJson(`https://shikimori.one/api/animes?search=${encodeURIComponent(title)}&limit=5&order=ranked`, { retries: 1 });
+    for (const item of data || []) {
+      if (!metaGuard(title, [item.name])) continue;
+      const image = item.image || {};
+      const rel = image.original || image.preview || '';
+      if (!rel || rel.includes('missing_')) continue;
+      const { year, season } = yearSeason(item.aired_on);
+      const m = emptyMeta(item.name || title);
+      m.poster = rel.startsWith('http') ? rel : `https://shikimori.io${rel}`;
+      m.score = item.score ? Math.round(Number(item.score) * 10) / 10 : null;
+      m.year = year; m.season = season;
+      m.totalEpisodes = item.episodes || item.episodes_aired || null;
+      m.status = ({ released: 'FINISHED', ongoing: 'RELEASING', anons: 'NOT_YET_RELEASED' })[item.status] || '';
+      m.format = ({ tv: 'TV', movie: 'MOVIE', ova: 'OVA', ona: 'ONA', special: 'SPECIAL' })[String(item.kind || '').toLowerCase()] || null;
+      return m;
+    }
+  } catch { /* gagal senyap */ }
+  return null;
+}
+const META_CHAIN = [
+  ['kitsu', kitsuSearch], ['bangumi', bangumiSearch],
+  ['tvmaze', tvmazeSearch], ['shikimori', shikimoriSearch],
+];
+async function chainSearch(title) {
+  // Penggabungan ISI CELAH antar provider, seperti enrich.py.
+  let merged = null;
+  for (const [, fn] of META_CHAIN) {
+    let meta = null;
+    try { meta = await fn(title); } catch { meta = null; }
+    if (!meta) continue;
+    if (!merged) { merged = emptyMeta(meta.title || title); merged.title = meta.title || title; }
+    for (const key of ['poster', 'banner', 'synopsis', 'score', 'year', 'season', 'studio', 'totalEpisodes', 'status', 'format']) {
+      const cur = merged[key];
+      const val = meta[key];
+      if ((cur === null || cur === '' || (Array.isArray(cur) && !cur.length)) && val !== null && val !== '' && val !== undefined) merged[key] = val;
+    }
+    for (const g of meta.genres || []) if (g && !merged.genres.includes(g)) merged.genres.push(g);
+    for (const a of meta.altTitles || []) if (a && a !== merged.title && !merged.altTitles.includes(a)) merged.altTitles.push(a);
+    if (merged.poster && merged.synopsis && merged.score) break;
+  }
+  return merged && (merged.poster || merged.synopsis) ? merged : null;
+}
 async function enrichNewTitle(malId, titleGuess) {
   if (malId) { const m = await anilistByMal(malId); if (m) return m; }
-  if (titleGuess) { const m = await anilistSearch(titleGuess); if (m) return m; return kitsuSearch(titleGuess); }
+  if (titleGuess) { const m = await anilistSearch(titleGuess); if (m) return m; return chainSearch(titleGuess); }
   return null;
 }
 
