@@ -392,7 +392,15 @@ async function fetchPostJson(url, body, { timeoutMs = 25000 } = {}) {
 const metaTokens = (x) => new Set(String(x || '').toLowerCase().match(/[a-z0-9]+/g) || []);
 function metaGuard(title, candidates) {
   const q = metaTokens(title);
-  if (!q.size) return false;
+  if (!q.size) {
+    // Judul non-Latin: kecocokan string persis ternormalisasi.
+    const t = String(title || '').toLowerCase().replace(/\s+/g, '');
+    if (!t) return false;
+    return (candidates || []).some((c) => {
+      const cc = String(c || '').toLowerCase().replace(/\s+/g, '');
+      return cc && (t === cc || cc.includes(t) || t.includes(cc));
+    });
+  }
   const longest = [...q].sort((a, b) => b.length - a.length)[0];
   const cand = new Set((candidates || []).flatMap((c) => [...metaTokens(c)]));
   return cand.has(longest);
