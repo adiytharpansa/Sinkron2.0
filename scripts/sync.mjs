@@ -562,7 +562,10 @@ function zokoDownloadUrl(cfg, embed) {
   try {
     if (cfg && cfg.download_url) return new URL(cfg.download_url, embed).href;
   } catch { /* lanjut ke pola */ }
-  if (embed && embed.includes('/stream/mal/')) return embed.replace('/stream/', '/download/');
+  // HANYA host zokoanime.video: pola /stream/mal/ juga ada di
+  // megaplay.buzz yang TIDAK punya halaman download (bug
+  // 15 Okt: URL unduh palsu megaplay sempat terbit).
+  if (embed && embed.includes('zokoanime.video/stream/mal/')) return embed.replace('/stream/', '/download/');
   return null;
 }
 const MEGAPLAY_KEY = Buffer.concat([Buffer.from('i?LMTAx0Q6,:}50U'), Buffer.alloc(16)]);
@@ -661,7 +664,7 @@ async function scrapeWpEpisode(pageUrl, title, ep, { enrich = true } = {}) {
     if (!m) throw new Error('Link stream gagal diekstrak dari embed.');
     streamUrl = m[1];
   }
-  if (!downloadUrl && embedUrl.includes('/stream/mal/')) downloadUrl = embedUrl.replace('/stream/', '/download/');
+  if (!downloadUrl && embedUrl.includes('zokoanime.video/stream/mal/')) downloadUrl = embedUrl.replace('/stream/', '/download/');
   if (downloadUrl && (!/^https?:\/\//.test(downloadUrl) || downloadUrl.endsWith('.apk'))) downloadUrl = null;
   return {
     rawTitle: title, episodeNum: ep, thumbnail, streamUrl, downloadUrl,
