@@ -1,0 +1,28 @@
+name: Poster Dimensi Diagnostik
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Ukur dimensi poster
+        run: node scripts/poster-dim.mjs
+      - name: Upload hasil ukur
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: poster-dim
+          path: poster-dim.json
+          if-no-files-found: warn
