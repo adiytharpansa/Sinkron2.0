@@ -1,0 +1,28 @@
+name: Poster Extra D1-only
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verifikasi extraLarge D1-only
+        run: node scripts/poster-extra.mjs
+      - name: Upload peta extra
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: poster-extra
+          path: poster-extra.json
+          if-no-files-found: warn
