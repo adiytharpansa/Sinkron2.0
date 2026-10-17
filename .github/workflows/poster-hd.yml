@@ -1,0 +1,28 @@
+name: Poster HD extraLarge
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Bangun peta extraLarge AniList
+        run: node scripts/poster-hd.mjs
+      - name: Upload peta
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: poster-extra-large
+          path: poster-extra-large.json
+          if-no-files-found: warn
