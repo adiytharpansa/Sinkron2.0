@@ -95,9 +95,38 @@ async function resolveMegaplayTracks(embedUrl) {
     if (t.kind !== 'captions' && t.kind !== 'subtitles') continue; // buang "thumbnails" dll.
     if (!t.file) continue;
     const label = String(t.label || 'English');
-    out.push({ label, lang: langOf(label), url: proxyWrap(String(t.file)) });
+    out.push({ label, lang: langOf(label), url: proxyWrap(String(t.file)), isDefault: t.default === true });
   }
-  return out;
+  return dedupeByLang(out).map(({ isDefault, ...rest }) => rest);
+}
+
+/** Satu trek per bahasa: sumber bisa mengembalikan belasan
+ *  varian "English" (server/kualitas berbeda) — menu subtitle
+ *  aplikasi cukup satu per bahasa. Pilihan: yang ditandai
+ *  default oleh sumber, lalu label yang persis nama bahasanya,
+ *  lalu yang pertama. */
+function dedupeByLang(tracks) {
+  const byLang = new Map();
+  for (const t of tracks) {
+    const cur = byLang.get(t.lang);
+    if (!cur) { byLang.set(t.lang, t); continue; }
+    const score = (x) => (x.isDefault ? 2 : 0) + (LANG_BY_NAME.some(([n, c]) => c === x.lang && x.label.toLowerCase() === n) ? 1 : 0);
+    if (score(t) > score(cur)) byLang.set(t.lang, t);
+  }
+  return [...byLang.values()];
+}
+
+/** Rapikan daftar tersimpan yang berisi bahasa ganda
+ *  (warisan sapuan pertama sebelum dedupe ada): pertahankan
+ *  satu per bahasa, urutan asli dipertahankan. */
+function dedupeStored(tracks) {
+  const seen = new Set();
+  return tracks.filter((t) => {
+    const lang = String((t && t.lang) || '').toLowerCase();
+    if (!lang || seen.has(lang)) return false;
+    seen.add(lang);
+    return true;
+  });
 }
 
 async function apiPost(payload) {
@@ -129,15 +158,19 @@ async function processTitle(anime) {
   const { data } = await fetchJson(`${API}?id=${encodeURIComponent(anime.id)}&fresh=1`, { timeoutMs: 60000, retries: 2 });
   const detail = (data && data.data) || null;
   if (!detail) return;
-  const targets = (detail.episodes || []).filter((e) =>
-    (!e.subtitles || e.subtitles.length === 0) && String(e.referer || '').includes('megaplay.buzz'));
+  const targets = (detail.episodes || []).filter((e) => String(e.referer || '').includes('megaplay.buzz'));
   stats.epsScanned += (detail.episodes || []).length;
   for (const ep of targets) {
+    const stored = ep.subtitles || [];
+    const storedDeduped = dedupeStored(stored);
+    if (stored.length && storedDeduped.length === stored.length) continue; // sudah terisi & rapi
     if (budget <= 0) return;
     budget -= 1;
     stats.epsTarget += 1;
     try {
-      const tracks = await resolveMegaplayTracks(ep.referer);
+      // Episode yang sudah terisi tetapi bahasanya ganda cukup
+      // dirapikan dari data tersimpan — tak perlu ke sumber.
+      const tracks = stored.length ? storedDeduped : await resolveMegaplayTracks(ep.referer);
       if (!tracks.length) { stats.epsNoTracks += 1; continue; }
       const out = await apiPost({
         rawTitle: detail.rawTitle, episodeNum: ep.number,

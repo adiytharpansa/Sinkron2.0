@@ -579,7 +579,8 @@ const proxyWrapFile = (file) => `${SITE_ORIGIN}/api/proxy?u=${encodeURIComponent
  *  hanya trek teks (captions/subtitles); "thumbnails" dibuang.
  *  Tabel bahasa sama dengan mapZokoSubtitles. */
 function mapMegaplayTracks(data) {
-  const out = [];
+  const LANGS = [['indonesia', 'id'], ['arab', 'ar'], ['french', 'fr'], ['italian', 'it'], ['portugu', 'pt'], ['russian', 'ru'], ['spanish', 'es'], ['german', 'de'], ['japan', 'ja'], ['english', 'en']];
+  const byLang = new Map();
   for (const t of (data && data.tracks) || []) {
     if (!t || typeof t !== 'object') continue;
     if (t.kind !== 'captions' && t.kind !== 'subtitles') continue;
@@ -587,12 +588,16 @@ function mapMegaplayTracks(data) {
     const label = String(t.label || 'English');
     const low = label.toLowerCase();
     let lang = 'en';
-    for (const [name, code] of [['indonesia', 'id'], ['arab', 'ar'], ['french', 'fr'], ['italian', 'it'], ['portugu', 'pt'], ['russian', 'ru'], ['spanish', 'es'], ['german', 'de'], ['japan', 'ja'], ['english', 'en']]) {
+    for (const [name, code] of LANGS) {
       if (low.includes(name)) { lang = code; break; }
     }
-    out.push({ label, lang, url: proxyWrapFile(String(t.file)) });
+    // Satu trek per bahasa: sumber bisa memberi belasan varian
+    // bahasa yang sama; utamakan yang ditandai default.
+    const cand = { label, lang, url: proxyWrapFile(String(t.file)), isDefault: t.default === true };
+    const cur = byLang.get(lang);
+    if (!cur || (cand.isDefault && !cur.isDefault)) byLang.set(lang, cand);
   }
-  return out;
+  return [...byLang.values()].map(({ isDefault, ...rest }) => rest);
 }
 async function extractMegaplay(embedHtml, embedUrl) {
   const m = String(embedHtml || '').match(/data-id="(\d+)"/);
