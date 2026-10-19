@@ -570,6 +570,30 @@ function zokoDownloadUrl(cfg, embed) {
 }
 const MEGAPLAY_KEY = Buffer.concat([Buffer.from('i?LMTAx0Q6,:}50U'), Buffer.alloc(16)]);
 const MEGAPLAY_IV = Buffer.from("W0;27ToaUpl_P%'c");
+/** Bungkus URL berkas lewat proksi API: berkas subtitle tinggal
+ *  di host CDN berputar yang sama dengan segmen video — host itu
+ *  tidak terjangkau langsung dari operator seluler pengguna,
+ *  sedangkan proksi API terbukti melayaninya. */
+const proxyWrapFile = (file) => `${SITE_ORIGIN}/api/proxy?u=${encodeURIComponent(file)}&ref=${encodeURIComponent('https://megaplay.buzz/')}`;
+/** Petakan bidang `tracks` (teks biasa) dari getSourcesNew:
+ *  hanya trek teks (captions/subtitles); "thumbnails" dibuang.
+ *  Tabel bahasa sama dengan mapZokoSubtitles. */
+function mapMegaplayTracks(data) {
+  const out = [];
+  for (const t of (data && data.tracks) || []) {
+    if (!t || typeof t !== 'object') continue;
+    if (t.kind !== 'captions' && t.kind !== 'subtitles') continue;
+    if (!t.file) continue;
+    const label = String(t.label || 'English');
+    const low = label.toLowerCase();
+    let lang = 'en';
+    for (const [name, code] of [['indonesia', 'id'], ['arab', 'ar'], ['french', 'fr'], ['italian', 'it'], ['portugu', 'pt'], ['russian', 'ru'], ['spanish', 'es'], ['german', 'de'], ['japan', 'ja'], ['english', 'en']]) {
+      if (low.includes(name)) { lang = code; break; }
+    }
+    out.push({ label, lang, url: proxyWrapFile(String(t.file)) });
+  }
+  return out;
+}
 async function extractMegaplay(embedHtml, embedUrl) {
   const m = String(embedHtml || '').match(/data-id="(\d+)"/);
   if (!m || !String(embedHtml).includes('getSources')) return null;
@@ -581,7 +605,12 @@ async function extractMegaplay(embedHtml, embedUrl) {
     const raw = Buffer.from(String(data.enc).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
     const decipher = createDecipheriv('aes-256-cbc', MEGAPLAY_KEY, MEGAPLAY_IV);
     const plain = Buffer.concat([decipher.update(raw), decipher.final()]);
-    return JSON.parse(plain.toString('utf8')).file || null;
+    const file = JSON.parse(plain.toString('utf8')).file || null;
+    if (!file) return null;
+    // Sejak 20 Okt 2026 tracks TIDAK lagi dibuang: di situlah
+    // subtitle resmi sumber berada (lihat juga scripts/subs.mjs
+    // untuk penambalan episode lama).
+    return { file, subtitles: mapMegaplayTracks(data) };
   } catch { return null; }
 }
 async function extract9anime(pageHtml, pageUrl) {
@@ -658,7 +687,11 @@ async function scrapeWpEpisode(pageUrl, title, ep, { enrich = true } = {}) {
     streamUrl = cfg.src;
     if (cfg.download_url) { try { downloadUrl = new URL(cfg.download_url, embedUrl).href; } catch { /* abaikan */ } }
   }
-  if (!streamUrl) streamUrl = (await extractMegaplay(embedHtml, embedUrl)) || '';
+  let mpSubs = [];
+  if (!streamUrl) {
+    const mp = await extractMegaplay(embedHtml, embedUrl);
+    if (mp) { streamUrl = mp.file || ''; mpSubs = mp.subtitles || []; }
+  }
   if (!streamUrl) {
     const m = embedHtml.match(/(https?:\/\/[^\s'"]+\.m3u8[^\s'"]*)/);
     if (!m) throw new Error('Link stream gagal diekstrak dari embed.');
@@ -666,9 +699,10 @@ async function scrapeWpEpisode(pageUrl, title, ep, { enrich = true } = {}) {
   }
   if (!downloadUrl && embedUrl.includes('zokoanime.video/stream/mal/')) downloadUrl = embedUrl.replace('/stream/', '/download/');
   if (downloadUrl && (!/^https?:\/\//.test(downloadUrl) || downloadUrl.endsWith('.apk'))) downloadUrl = null;
+  const zokoSubs = mapZokoSubtitles(cfg);
   return {
     rawTitle: title, episodeNum: ep, thumbnail, streamUrl, downloadUrl,
-    headers: { Referer: embedUrl }, subtitles: mapZokoSubtitles(cfg),
+    headers: { Referer: embedUrl }, subtitles: zokoSubs.length ? zokoSubs : mpSubs,
     meta: enrich ? await enrichNewTitle(null, title) : null,
   };
 }
