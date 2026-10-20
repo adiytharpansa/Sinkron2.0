@@ -88,7 +88,7 @@ async function anilistMal(ids) {
   }
   return out;
 }
-const targets = JSON.parse(readFileSync(new URL('./repair-targets.json', import.meta.url), 'utf8'));
+const targets = JSON.parse(readFileSync(new URL(process.env.TARGETS_FILE || './repair-targets.json', import.meta.url), 'utf8'));
 const slugs = Object.keys(targets).filter(s => !ONLY || s === ONLY);
 console.log(`--- repair-stream mulai | judul ${slugs.length}${DRY ? ' DRY' : ''}${ONLY ? ' hanya=' + ONLY : ''} ---`);
 const aniIds = {};
@@ -100,12 +100,38 @@ for (const slug of slugs) {
 }
 const malMap = await anilistMal([...new Set(Object.values(aniIds).map(v => v.anilist).filter(Boolean))]);
 console.log('idMal terpetakan:', Object.keys(malMap).length);
+// Cadangan: judul tanpa anilistId/idMal -> cari AniList berdasar judul katalog (gerbang kemiripan ketat).
+const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const sim = (a, b) => { const A = new Set(norm(a).split(' ')), B = new Set(norm(b).split(' ')); const inter = [...A].filter(x => B.has(x)).length; return inter / Math.max(1, Math.max(A.size, B.size)); };
+async function malByTitle(detail) {
+  const cands = [detail.title, detail.rawTitle, ...(detail.altTitles || [])].filter(Boolean);
+  for (const q of cands) {
+    try {
+      const r = await fetch('https://graphql.anilist.co', { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': UA }, body: JSON.stringify({ query: 'query($s:String){ Page(perPage:5){ media(search:$s, type:ANIME){ id idMal title{ romaji english native } seasonYear } } }', variables: { s: q } }) });
+      const jj = await r.json();
+      for (const m of jj?.data?.Page?.media || []) {
+        if (!m.idMal) continue;
+        const names = [m.title?.romaji, m.title?.english, m.title?.native].filter(Boolean);
+        if (names.some(n => sim(n, q) >= 0.72)) return m.idMal;
+      }
+    } catch { /* lanjut */ }
+    await sleep(500);
+  }
+  return null;
+}
+for (const slug of slugs) {
+  const info = aniIds[slug];
+  if (!info || malMap[info.anilist]) continue;
+  const found = await malByTitle(info.detail);
+  if (found) { malMap['title:' + slug] = found; console.log(`MAL via judul ${slug} -> ${found}`); }
+}
+
 const totals = { filled: 0, noSrc: 0, failed: 0, noMal: 0 };
 for (const slug of slugs) {
   const info = aniIds[slug];
   if (!info) continue;
   const detail = info.detail;
-  const MAL = malMap[info.anilist];
+  const MAL = malMap[info.anilist] || malMap['title:' + slug];
   const want = new Set(targets[slug]);
   if (!MAL) { totals.noMal += want.size; console.log(`TANPA MAL ${slug} (${want.size} ep dilewati)`); continue; }
   globalThis.__MAL = MAL;

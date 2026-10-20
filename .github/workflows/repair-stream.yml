@@ -12,6 +12,10 @@ on:
         type: boolean
         required: false
         default: false
+      targets_file:
+        description: "Berkas target (repair-targets.json / repair-targets2.json)"
+        required: false
+        default: "repair-targets.json"
 
 concurrency:
   group: repair-stream
@@ -32,6 +36,8 @@ jobs:
         with:
           node-version: 22
       - name: Repair
+        env:
+          TARGETS_FILE: ${{ inputs.targets_file }}
         run: |
           ARGS=""
           if [ -n "${{ inputs.only_id }}" ]; then ARGS="$ARGS --only ${{ inputs.only_id }}"; fi
