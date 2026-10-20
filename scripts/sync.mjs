@@ -579,7 +579,20 @@ const proxyWrapFile = (file) => `${SITE_ORIGIN}/api/proxy?u=${encodeURIComponent
  *  hanya trek teks (captions/subtitles); "thumbnails" dibuang.
  *  Tabel bahasa sama dengan mapZokoSubtitles. */
 function mapMegaplayTracks(data) {
-  const LANGS = [['indonesia', 'id'], ['arab', 'ar'], ['french', 'fr'], ['italian', 'it'], ['portugu', 'pt'], ['russian', 'ru'], ['spanish', 'es'], ['german', 'de'], ['japan', 'ja'], ['english', 'en']];
+  // Bahasa dari NAMA BERKAS lebih dulu (kode ISO 639-2 pada berkas
+  // DSNP tegas: chi-21.vtt adalah Tionghoa) — label bebas hanya
+  // cadangan dan yang tak dikenal TIDAK ditebak Inggris (bug
+  // 20 Okt 2026: trek Tionghoa tersimpan sebagai 'en' dan dedupe
+  // membuang trek Inggris aslinya). Logika sama dengan subs.mjs.
+  const LANGS = [['indonesia', 'id'], ['arab', 'ar'], ['french', 'fr'], ['italian', 'it'], ['portugu', 'pt'], ['russian', 'ru'], ['spanish', 'es'], ['german', 'de'], ['japan', 'ja'], ['english', 'en'], ['chinese', 'zh'], ['mandarin', 'zh'], ['cantonese', 'zh'], ['korean', 'ko'], ['thai', 'th'], ['vietnam', 'vi'], ['malay', 'ms'], ['dutch', 'nl'], ['polish', 'pl'], ['turk', 'tr'], ['swedish', 'sv'], ['danish', 'da'], ['finnish', 'fi'], ['norweg', 'no'], ['czech', 'cs'], ['greek', 'el'], ['hebrew', 'he'], ['hindi', 'hi'], ['ukrain', 'uk'], ['filipino', 'fil']];
+  const BY_FILE = { eng: 'en', ind: 'id', msa: 'ms', may: 'ms', zho: 'zh', chi: 'zh', jpn: 'ja', kor: 'ko', spa: 'es', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', ita: 'it', por: 'pt', rus: 'ru', ara: 'ar', tha: 'th', vie: 'vi', dut: 'nl', nld: 'nl', pol: 'pl', tur: 'tr', swe: 'sv', dan: 'da', fin: 'fi', nor: 'no', ces: 'cs', cze: 'cs', ell: 'el', gre: 'el', heb: 'he', hin: 'hi', ukr: 'uk', fil: 'fil' };
+  const langFromFile = (file) => {
+    const name = String(file || '').split('/').pop() || '';
+    const m = name.match(/^([a-z]{3})[-_.]/i) || name.match(/[-_]([a-z]{3})\.(?:vtt|srt|ass)$/i) || name.match(/^([a-z]{3})\.(?:vtt|srt|ass)$/i);
+    if (m) return BY_FILE[m[1].toLowerCase()] || null;
+    const two = name.match(/^([a-z]{2})\.(?:vtt|srt|ass)$/i);
+    return two ? two[1].toLowerCase() : null;
+  };
   const byLang = new Map();
   for (const t of (data && data.tracks) || []) {
     if (!t || typeof t !== 'object') continue;
@@ -587,10 +600,11 @@ function mapMegaplayTracks(data) {
     if (!t.file) continue;
     const label = String(t.label || 'English');
     const low = label.toLowerCase();
-    let lang = 'en';
-    for (const [name, code] of LANGS) {
+    let lang = langFromFile(t.file);
+    if (!lang) for (const [name, code] of LANGS) {
       if (low.includes(name)) { lang = code; break; }
     }
+    if (!lang) continue;
     // Satu trek per bahasa: sumber bisa memberi belasan varian
     // bahasa yang sama; utamakan yang ditandai default.
     const cand = { label, lang, url: proxyWrapFile(String(t.file)), isDefault: t.default === true };

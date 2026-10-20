@@ -70,12 +70,29 @@ async function fetchJson(url, opts) {
   try { return { data: JSON.parse(text), status }; } catch { return { data: null, status }; }
 }
 
-/* Tabel bahasa yang sama dengan mapZokoSubtitles di sync.mjs. */
-const LANG_BY_NAME = [['indonesia', 'id'], ['arab', 'ar'], ['french', 'fr'], ['italian', 'it'], ['portugu', 'pt'], ['russian', 'ru'], ['spanish', 'es'], ['german', 'de'], ['japan', 'ja'], ['english', 'en']];
-function langOf(label, fallback) {
+/* Bahasa trek ditentukan pertama-tama dari NAMA BERKAS sumber:
+ * berkas DSNP memakai kode ISO 639-2 yang tegas (chi-21.vtt,
+ * eng-*.vtt, fre-8.vtt, ...) — jauh lebih bisa dipercaya daripada
+ * label bebas. Label hanya cadangan, dan yang tak dikenal TIDAK
+ * ditebak lagi sebagai Inggris: bug 20 Okt 2026 — trek Tionghoa
+ * berlabel "Chinese (- DSNP ...)" tak cocok tabel lama, jatuh ke
+ * bawaan 'en', lalu dedupe membuang trek Inggris asli karena
+ * "sudah ada en". Trek tanpa bahasa yang jelas kini dibuang. */
+const LANG_BY_NAME = [['indonesia', 'id'], ['arab', 'ar'], ['french', 'fr'], ['italian', 'it'], ['portugu', 'pt'], ['russian', 'ru'], ['spanish', 'es'], ['german', 'de'], ['japan', 'ja'], ['english', 'en'], ['chinese', 'zh'], ['mandarin', 'zh'], ['cantonese', 'zh'], ['korean', 'ko'], ['thai', 'th'], ['vietnam', 'vi'], ['malay', 'ms'], ['dutch', 'nl'], ['polish', 'pl'], ['turk', 'tr'], ['swedish', 'sv'], ['danish', 'da'], ['finnish', 'fi'], ['norweg', 'no'], ['czech', 'cs'], ['greek', 'el'], ['hebrew', 'he'], ['hindi', 'hi'], ['ukrain', 'uk'], ['filipino', 'fil']];
+const LANG_BY_FILE = { eng: 'en', ind: 'id', msa: 'ms', may: 'ms', zho: 'zh', chi: 'zh', jpn: 'ja', kor: 'ko', spa: 'es', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', ita: 'it', por: 'pt', rus: 'ru', ara: 'ar', tha: 'th', vie: 'vi', dut: 'nl', nld: 'nl', pol: 'pl', tur: 'tr', swe: 'sv', dan: 'da', fin: 'fi', nor: 'no', ces: 'cs', cze: 'cs', ell: 'el', gre: 'el', heb: 'he', hin: 'hi', ukr: 'uk', fil: 'fil' };
+function langFromFile(file) {
+  const name = String(file || '').split('/').pop() || '';
+  const m = name.match(/^([a-z]{3})[-_.]/i) || name.match(/[-_]([a-z]{3})\.(?:vtt|srt|ass)$/i) || name.match(/^([a-z]{3})\.(?:vtt|srt|ass)$/i);
+  if (m) return LANG_BY_FILE[m[1].toLowerCase()] || null;
+  const two = name.match(/^([a-z]{2})\.(?:vtt|srt|ass)$/i);
+  return two ? two[1].toLowerCase() : null;
+}
+function langOfTrack(label, file) {
+  const fromFile = langFromFile(file);
+  if (fromFile) return fromFile;
   const low = String(label || '').toLowerCase();
   for (const [name, code] of LANG_BY_NAME) if (low.includes(name)) return code;
-  return fallback || 'en';
+  return null;
 }
 const proxyWrap = (file) => `${SITE_ORIGIN}/api/proxy?u=${encodeURIComponent(file)}&ref=${encodeURIComponent('https://megaplay.buzz/')}`;
 
@@ -95,7 +112,9 @@ async function resolveMegaplayTracks(embedUrl) {
     if (t.kind !== 'captions' && t.kind !== 'subtitles') continue; // buang "thumbnails" dll.
     if (!t.file) continue;
     const label = String(t.label || 'English');
-    out.push({ label, lang: langOf(label), url: proxyWrap(String(t.file)), isDefault: t.default === true });
+    const lang = langOfTrack(label, t.file);
+    if (!lang) continue; // bahasa tak jelas — jangan tebak
+    out.push({ label, lang, url: proxyWrap(String(t.file)), isDefault: t.default === true });
   }
   return dedupeByLang(out).map(({ isDefault, ...rest }) => rest);
 }
@@ -127,6 +146,30 @@ function dedupeStored(tracks) {
     seen.add(lang);
     return true;
   });
+}
+
+/** Perbaiki label bahasa trek TERSIMPAN dari nama berkas di URL
+ *  trek itu sendiri (membuka bungkus proksi lebih dulu) — nama
+ *  berkas adalah otoritas; label teks sumber tidak. Mengembalikan
+ *  daftar baru + penanda berubah. Trek yang nama berkasnya tak
+ *  berkode bahasa dibiarkan apa adanya. */
+function relabelStored(tracks) {
+  let changed = false;
+  const out = tracks.map((t) => {
+    if (!t || !t.url) return t;
+    let inner = String(t.url);
+    try {
+      const u = new URL(inner);
+      const wrapped = u.searchParams.get('u');
+      if (wrapped) inner = wrapped;
+    } catch { /* abaikan */ }
+    const code = langFromFile(inner);
+    if (code && code !== t.lang) { changed = true; return { ...t, lang: code }; }
+    return t;
+  });
+  const deduped = dedupeStored(out);
+  if (deduped.length !== out.length) changed = true;
+  return { tracks: deduped, changed };
 }
 
 async function apiPost(payload) {
@@ -162,15 +205,27 @@ async function processTitle(anime) {
   stats.epsScanned += (detail.episodes || []).length;
   for (const ep of targets) {
     const stored = ep.subtitles || [];
-    const storedDeduped = dedupeStored(stored);
-    if (stored.length && storedDeduped.length === stored.length) continue; // sudah terisi & rapi
+    // Perbaikan label dari nama berkas (kasus trek Tionghoa
+    // tersimpan sebagai 'en'): daftar yang berubah perlu ditulis
+    // ulang walau jumlah treknya sama.
+    const relabeled = stored.length ? relabelStored(stored) : { tracks: [], changed: false };
+    const needsRepair = stored.length > 0 && relabeled.changed;
+    const lacksEnglish = stored.length > 0 && !relabeled.tracks.some((t) => t.lang === 'en');
+    if (stored.length && !needsRepair && !lacksEnglish) continue; // sudah terisi, rapi, ada Inggris
     if (budget <= 0) return;
     budget -= 1;
     stats.epsTarget += 1;
     try {
-      // Episode yang sudah terisi tetapi bahasanya ganda cukup
-      // dirapikan dari data tersimpan — tak perlu ke sumber.
-      const tracks = stored.length ? storedDeduped : await resolveMegaplayTracks(ep.referer);
+      // Episode yang labelnya rusak / tak punya Inggris: coba
+      // tangkap ulang dari sumber (daftar segar kini dipetakan
+      // dengan benar); bila sumber memberi Inggris, daftar segar
+      // yang otoritatif dipakai. Selain itu cukup perapian data
+      // tersimpan — tak perlu ke sumber.
+      let tracks = relabeled.tracks;
+      if (!stored.length || needsRepair || lacksEnglish) {
+        const fresh = await resolveMegaplayTracks(ep.referer).catch(() => []);
+        if (fresh.length && (!stored.length || fresh.some((t) => t.lang === 'en'))) tracks = fresh;
+      }
       if (!tracks.length) { stats.epsNoTracks += 1; continue; }
       const out = await apiPost({
         rawTitle: detail.rawTitle, episodeNum: ep.number,
