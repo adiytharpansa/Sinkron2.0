@@ -127,6 +127,34 @@ for (const slug of slugs) {
 }
 
 const totals = { filled: 0, noSrc: 0, failed: 0, noMal: 0 };
+
+// Cadangan kedua: pencarian teks Kitsu -> mappings -> MAL (gerbang kemiripan sama).
+async function malByKitsu(detail) {
+  const cands = [detail.title, detail.rawTitle, ...(detail.altTitles || [])].filter(Boolean);
+  for (const q of cands) {
+    try {
+      const r = await fetch(`https://kitsu.io/api/edge/anime?filter%5Btext%5D=${encodeURIComponent(q)}&page%5Blimit%5D=5`, { headers: { Accept: 'application/vnd.api+json', 'User-Agent': UA } });
+      const jj = await r.json();
+      for (const a of jj?.data || []) {
+        const names = [a.attributes?.canonicalTitle, ...Object.values(a.attributes?.titles || {})].filter(Boolean);
+        if (!names.some(n => sim(n, q) >= 0.72)) continue;
+        await sleep(400);
+        const r2 = await fetch(`https://kitsu.io/api/edge/anime/${a.id}/mappings`, { headers: { Accept: 'application/vnd.api+json', 'User-Agent': UA } });
+        const j2 = await r2.json();
+        const mal = (j2?.data || []).find(m => m.attributes?.externalSite === 'myanimelist/anime')?.attributes?.externalId;
+        if (mal) return Number(mal);
+      }
+    } catch { /* lanjut */ }
+    await sleep(500);
+  }
+  return null;
+}
+for (const slug of slugs) {
+  const info = aniIds[slug];
+  if (!info || malMap[info.anilist] || malMap['title:' + slug]) continue;
+  const found = (await malByTitle(info.detail)) || (await malByKitsu(info.detail));
+  if (found) { malMap['title:' + slug] = found; console.log(`MAL via cadangan2 ${slug} -> ${found}`); }
+}
 for (const slug of slugs) {
   const info = aniIds[slug];
   if (!info) continue;
